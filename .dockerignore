@@ -1,0 +1,14 @@
+# Keep secrets, git history, and runtime state OUT of the image.
+.git
+.gitignore
+*.env
+relay.env
+env.txt
+data/captain.*.md
+data/
+.worktrees/
+__pycache__/
+*.pyc
+.mypy_cache/
+.DS_Store
+tests/

@@ -1,0 +1,29 @@
+# Relay on the NAS. See NAS_DEPLOYMENT.md for the full walkthrough.
+#   1) build CLIDE -> clide:latest   2) cp relay.env.example relay.env && fill   3) docker compose up -d
+services:
+  relay:
+    build: { context: ., dockerfile: Dockerfile }
+    image: relay:latest
+    container_name: relay
+    restart: always
+    cap_add: ["NET_ADMIN"]            # CLIDE egress firewall
+    env_file: [ relay.env ]           # subscription tokens (gitignored) — see relay.env.example
+    environment:
+      RELAY_PROFILE: personal
+      RELAY_LANES: "copilot,agy,codex,claude"     # ordered ladder; claude is the floor
+      RELAY_PROJECT: /workspace/smartocrprocess   # auto-dispatch target (single repo for now)
+      RELAY_AUTODISPATCH: "0"          # flip to 1 ONLY after a clean manual dry-run
+      RELAY_MAX_WORKERS: "2"           # concurrency cap — raise slowly while watching NAS RAM
+      DATA_DIR: /workspace/.relay-data # relay state on the persistent volume (survives rebuilds)
+      # add Gemini/agy hosts to CLIDE's allowlist (Anthropic/GitHub/OpenAI/npm are default):
+      CLIDE_ALLOWED_HOSTS: "generativelanguage.googleapis.com,oauth2.googleapis.com,antigravity.google,accounts.google.com"
+      TTYD_USER: relay
+      TTYD_PASS: ${TTYD_PASS}
+    volumes:
+      # managed repos + worktrees + relay data — the durable state. Point at NAS storage:
+      - ${RELAY_WORKSPACE:-./workspace}:/workspace
+      # optional: persist device-login creds for lanes that use them (codex/agy)
+      - ${RELAY_CREDS:-./creds}/codex:/root/.codex
+      - ${RELAY_CREDS:-./creds}/agy:/root/.agy
+    ports:
+      - "7681:7681"                    # ttyd web terminal — LAN ONLY, never port-forward to WAN
