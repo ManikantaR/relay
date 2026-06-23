@@ -1,6 +1,7 @@
 # secrets — never commit a filled environment
 data/captain.*.md
 .env
+*.env
 env.txt
 # runtime state
 data/*/active
@@ -16,4 +17,6 @@ data/.lanes.json
 __pycache__/
 *.pyc
 .mypy_cache/
+# os
+.DS_Store
 # per-project memory lives in each project's repo, not here
