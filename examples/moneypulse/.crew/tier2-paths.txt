@@ -1,0 +1,8 @@
+**/crypto/**
+**/auth/**
+**/jwt/**
+**/pii/**
+**/migrations/**
+**/*encrypt*
+**/*decrypt*
+**/*key-rotation*

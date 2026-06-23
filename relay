@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# relay — entrypoint (Mac/Linux). Dispatches to the Python control plane.
+set -euo pipefail
+cd "$(dirname "$0")"
+exec python3 py/relay_cli.py "$@"

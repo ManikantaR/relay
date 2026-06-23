@@ -1,0 +1,3 @@
+tests/crypto/encrypt_decrypt_roundtrip.test.ts
+tests/crypto/gcm_tamper_detection.test.ts
+tests/crypto/key_rotation.test.ts

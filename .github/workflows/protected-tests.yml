@@ -1,0 +1,31 @@
+name: relay-protected-tests
+# Fails the PR if a worker's diff touches an owner-owned gating test.
+# A test the agent can move is a suggestion, not a gate.
+on:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Block edits to protected tests
+        run: |
+          set -euo pipefail
+          LIST=".crew/protected-tests.txt"
+          [[ -f "$LIST" ]] || LIST="data/protected-tests.txt"
+          [[ -f "$LIST" ]] || { echo "no protected-tests list; skipping"; exit 0; }
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          V=0
+          while IFS= read -r p; do
+            [[ -z "$p" ]] && continue
+            if grep -qx "$p" <<<"$CHANGED"; then
+              echo "::error file=$p::Protected test touched by agent diff — owner-owned, not crew-editable."
+              V=1
+            fi
+          done < "$LIST"
+          [[ "$V" -eq 0 ]] && echo "Protected-test guard passed." || { echo "Guard failed."; exit 1; }

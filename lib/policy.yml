@@ -1,0 +1,21 @@
+# Relay — shared policy (inherited by every profile, weakened by none)
+#
+# These rules are identical at work and at home. A profile may choose an
+# ADAPTER (where work items come from, where notifications go). It may NOT
+# relax anything below.
+
+policy:
+  merge:
+    auto_merge: false            # every merge is a human click. always.
+  mode:
+    delivery: no-mistakes        # full validation pipeline on every deliver task
+    edit: auto                   # workers auto-edit inside their own worktree
+    yolo: false                  # never. no project, no profile, no override.
+  tiers:
+    tier2_gate: human-line-by-line   # reviewer-agent approval is INPUT, never permission
+    tier2_may_wait: true             # a held Tier-2 PR waiting for a desk is correct, not a stall
+    unguarded_tier2: file-issue      # a Tier-2 path with no protected test => file a gap issue, do not proceed
+  protected_tests:
+    worker_editable: false       # if a worker can edit the gating test, it is not a gate
+  pickup:
+    requires_contract: true      # no checkable stop condition + scope fence => not dispatched

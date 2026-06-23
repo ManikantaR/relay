@@ -1,0 +1,19 @@
+# secrets — never commit a filled environment
+data/captain.*.md
+.env
+env.txt
+# runtime state
+data/*/active
+data/*/worker.log
+data/*/status.md
+data/*/meta.json
+data/*/brief.md
+data/*/job.id
+data/*/evidence/
+data/.lanes.json
+.worktrees/
+# python
+__pycache__/
+*.pyc
+.mypy_cache/
+# per-project memory lives in each project's repo, not here
