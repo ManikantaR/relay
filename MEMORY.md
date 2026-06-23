@@ -42,6 +42,25 @@ Resume:  this commit is the clean checkpoint. Lane resolution is spec'd in AGENT
 
 ---
 
+## 2026-06-23 · personal · agent
+Did:   NAS deployment decided + documented (NAS_DEPLOYMENT.md). HOME = Docker on the UGREEN
+       NAS, base image = ADOPT CLIDE (github itscooleric/clide — bundles claude/copilot/codex/gh
+       + tmux + ttyd web terminal :7681 + iptables egress allowlist; audited safe, single-user;
+       caveat: logs full prompts to intercept.jsonl) + layer agy + relay on top. WORK = relay
+       NATIVE on the Windows laptop (no Docker; wt-tab/bg-job spawner; RELAY_STRICT_LANES=1;
+       TFS+Teams). AUTH = long-lived SUBSCRIPTION TOKENS in .env (claude `setup-token` ~1yr;
+       GH_TOKEN PAT w/ Copilot Requests covers gh+copilot; codex device-login or key; agy/Gemini
+       creds), generated once on the Mac, injected as env — no browser in container. Egress
+       allowlist += Gemini/agy hosts. Code lives in bind-mounted /workspace volume; branches
+       relay/<lane>-t<id> pushed by control plane. Connect: Telegram primary + ttyd web terminal
+       (LAN only) + ssh+tmux attach to intervene. Deleted the superseded smartocrprocess/orch/.
+Next:  Build relay_lanes.py (still the top code task, AGENTS.md §12). Then a Dockerfile.relay +
+       docker-compose on the NAS per NAS_DEPLOYMENT.md A2; one manual `relay dispatch 12 --lane
+       agy` dry-run; then RELAY_AUTODISPATCH=1.
+Blocked: NAS worker-runtime/token setup is owner action (interactive logins on the Mac).
+
+---
+
 ## 2026-06-23 · personal · owner
 Did:   Built Relay. Python-only control plane (cli/control/board/spawn). Two-tier leash,
        capability-ladder spawner (wt-tab→bg-job→tmux), Telegram/Teams notify, GitHub board
