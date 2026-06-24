@@ -53,6 +53,7 @@ _FRAMES = {
     "tier2-held":        "🔒 NEEDS YOUR EYES — no rush, review at a desk · {task}\n{detail}",
     "waiting-on-limit":  "⏳ idle — rate-limited, probing. NOT stuck. · {task}",
     "resumed":           "▶️ resumed — window reopened · {task}",
+    "lane-switch":       "🔀 failed over {detail} · {task}",
     "hung":              "🛑 STUCK — no progress, needs you · {task}\n{detail}",
     "crashed-respawned": "🔁 crashed → respawned from worktree · {task}",
     "merged":            "🎉 merged · {task}\n{detail}",
@@ -191,6 +192,30 @@ def close_out(task: str) -> None:
     _clear_active(task)
 
 
+# --- lane failover: pick the next available lane this task hasn't tried (AGENTS.md §12) ---
+
+def _failover_lane(task: str) -> dict | None:
+    """On rate-limit, switch the task to the next available untried lane and update meta.
+    Returns {'from','to'} on a switch, or None when no fresh lane exists (Tier-2, or all capped
+    -> the caller idle-waits instead)."""
+    import relay_lanes as lanes
+    metap = CFG.data_dir / task / "meta.json"
+    if not metap.exists():
+        return None
+    meta = json.loads(metap.read_text())
+    tried = meta.get("tried_lanes", [meta.get("lane")])
+    nxt, _reason = lanes.resolve_lane(
+        meta.get("requested", meta.get("lane")), meta.get("explicit", False),
+        meta.get("tier", "1"), lanes.available_lanes(), tried=tried)
+    if not nxt or nxt in tried:
+        return None
+    frm = meta.get("lane")
+    meta["lane"] = nxt
+    meta["tried_lanes"] = tried + [nxt]
+    metap.write_text(json.dumps(meta))
+    return {"from": frm, "to": nxt}
+
+
 # --- the watchdog: rate-limited (probe&resume) | hung (escalate) | done (close) ----------
 
 def supervise(task: str, probe, resume) -> None:
@@ -200,7 +225,14 @@ def supervise(task: str, probe, resume) -> None:
     if state is State.HELD:
         _clear_active(task); return
     if state is State.RATE_LIMITED:
-        notify("waiting-on-limit", task, f"probing every {CFG.probe_interval}s")
+        # Failover FIRST: resume on the next available lane (AGENTS.md §12). Only when every
+        # lane is capped — or Tier-2 (which never downgrades) — do we idle-probe-and-wait.
+        switch = _failover_lane(task)
+        if switch:
+            notify("lane-switch", task, f"{switch['from']}→{switch['to']} (rate limit)")
+            resume(task)                          # resume reads the updated meta.lane
+            return
+        notify("waiting-on-limit", task, f"all lanes capped; probing every {CFG.probe_interval}s")
         while True:
             rc = probe()
             if rc == 0:
@@ -250,8 +282,8 @@ def auto_dispatch() -> None:
         if not _contract_ok(t):
             log.info("skip t%s: incomplete contract (needs tier label + spec)", t.id)
             continue
-        dispatch_ticket(t, CFG.project)
-        active += 1
+        if dispatch_ticket(t, CFG.project):     # held tickets return None — don't count them
+            active += 1
 
 
 # --- dispatch one ticket (shared by manual `relay dispatch` and auto_dispatch) ------------
@@ -291,11 +323,22 @@ Tests pass, evidence complete, work committed on your branch. End `summary.md` w
 """
 
 
-def dispatch_ticket(ticket, project: str, lane_override: str | None = None) -> str:
+def dispatch_ticket(ticket, project: str, lane_override: str | None = None) -> str | None:
     import relay_spawn as spawn
+    import relay_lanes as lanes
     from relay_board import get_board
     task = f"t{ticket.id}"
-    lane = spawn.pick_lane(getattr(ticket, "labels", []), ticket.tier, lane_override)
+
+    preferred, explicit = lanes.lane_preference(getattr(ticket, "labels", []), lane_override)
+    lane, reason = lanes.resolve_lane(preferred, explicit, ticket.tier, lanes.available_lanes())
+    if lane is None:
+        # HOLD: work strict mismatch, or Tier-2 needs claude and claude is unavailable here.
+        _notify_once("needs-decision", task, f"held — lane unresolved ({reason})")
+        memory_append(did=f"{task} NOT dispatched — lane hold ({reason})",
+                      nxt="Owner: enable/auth a lane, relabel, or make claude available.",
+                      project_dir=project, author="agent")
+        return None
+
     taskdir = CFG.data_dir / task
     taskdir.mkdir(parents=True, exist_ok=True)
     evidence = (taskdir / "evidence").resolve()
@@ -307,9 +350,11 @@ def dispatch_ticket(ticket, project: str, lane_override: str | None = None) -> s
         lane=lane, taskdir=taskdir.resolve(), evidence=evidence, tier2=tier2), encoding="utf-8")
 
     get_board().apply_label(ticket.id, "agent-wip")     # control-plane mutates the board
-    mode = spawn.spawn(task, project, ticket.id, ticket.tier, str(brief), lane, ticket.title)
-    notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}")
-    memory_append(did=f"Dispatched {task} ({ticket.title}) tier-{ticket.tier} lane={lane}",
+    mode = spawn.spawn(task, project, ticket.id, ticket.tier, str(brief), lane, ticket.title,
+                       requested=preferred, explicit=explicit)
+    tag = "" if reason == "preferred" else f" [{reason}]"        # never silent: announce subs
+    notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}")
+    memory_append(did=f"Dispatched {task} ({ticket.title}) tier-{ticket.tier} lane={lane}{tag}",
                   nxt="Worker implementing; await evidence-gated PR."
                       + (" Tier-2 will HOLD." if ticket.tier == "2" else ""),
                   project_dir=project, author="agent")
@@ -344,8 +389,12 @@ def memory_append(did: str, nxt: str = "", blocked: str = "none",
 
 
 def run_loop(probe, resume) -> None:
+    import relay_lanes as lanes
+    log.info("Performing startup lane validation...")
+    avail = lanes.available_lanes(refresh=True)
     log.info("relay control plane up (profile=%s, poll=%ss, autodispatch=%s, cap=%s)",
              CFG.profile, CFG.poll, CFG.autodispatch, CFG.max_workers)
+    log.info("Available lanes (auth-checked): %s", ", ".join(avail) or "(none)")
     while True:
         if CFG.data_dir.exists():
             for d in CFG.data_dir.iterdir():

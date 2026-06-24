@@ -26,26 +26,13 @@ WORKTREES_NAME = os.getenv("RELAY_WORKTREES", ".worktrees")
 DEFAULT_LANE = os.getenv("RELAY_LANE", "claude")
 PY = os.getenv("RELAY_PYTHON", "python3")
 HERE = Path(__file__).resolve().parent
-LANES = ("claude", "agy", "codex")
-LANE_PREFIX = {"claude": "cc", "agy": "ag", "codex": "cx"}
+LANES = ("claude", "agy", "copilot", "codex")
+LANE_PREFIX = {"claude": "cc", "agy": "ag", "copilot": "co", "codex": "cx"}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-def pick_lane(labels: list[str], tier: str, override: str | None = None) -> str:
-    """Route a ticket to a lane. Explicit override > `lane:<x>` label > tier rule.
-    Tier-2 is sacred -> always the craftsmanship lane, never a cheap one."""
-    if override in LANES:
-        return override
-    for n in labels:
-        if n.startswith("lane:") and n.split(":", 1)[1] in LANES:
-            lane = n.split(":", 1)[1]
-            return "claude" if tier == "2" else lane
-    if tier == "2":
-        return "claude"
-    return DEFAULT_LANE
 
 
 def _harness_cmd(lane: str, brief: Path, mode: str) -> str:
@@ -58,6 +45,8 @@ def _harness_cmd(lane: str, brief: Path, mode: str) -> str:
         return f'claude -p "$(cat {brief})" --permission-mode acceptEdits'
     if lane == "agy":                          # script -qec: keep agy output under a non-TTY
         return f"script -qec 'agy -p \"$(cat {brief})\"' /dev/null"
+    if lane == "copilot":
+        return f'copilot --allow-all-tools --autopilot -p "$(cat {brief})"'
     if lane == "codex":
         return f'codex exec --sandbox workspace-write "$(cat {brief})"'
     raise ValueError(f"unknown lane {lane}")
@@ -96,7 +85,8 @@ def _base_ref(project: str, default: str = "main") -> str:
 
 
 def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
-          lane: str, title: str = "") -> str:
+          lane: str, title: str = "", requested: str | None = None,
+          explicit: bool = False) -> str:
     """Create the worktree + branch, record meta, launch the lane's harness."""
     taskdir = DATA / task
     taskdir.mkdir(parents=True, exist_ok=True)
@@ -118,7 +108,8 @@ def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
     (taskdir / "meta.json").write_text(json.dumps({
         "item": item, "tier": tier, "lane": lane, "mode": mode,
         "project": str(proj), "worktree": str(wt_abs), "branch": branch,
-        "title": title,
+        "title": title, "requested": requested or lane, "explicit": explicit,
+        "tried_lanes": [lane],
     }))
     (taskdir / "status.md").write_text(f"PROGRESS {_now()}\n")
     (taskdir / "active").touch()

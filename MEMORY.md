@@ -15,6 +15,13 @@ Blocked: <anything waiting, or "none">
 
 ---
 
+## 2026-06-24 · personal · agent
+Did:   Finished wiring and testing `relay_lanes.py` per AGENTS.md §12. Removed obsolete `pick_lane` function from `relay_spawn.py` and its tests in `test_relay_logic.py`. Added new comprehensive tests for lane configuration, strict governance, and caching/validation behavior. Wired startup lane validation into `relay_control.py`'s `run_loop` to perform a cheap auth-check, drop dead lanes, and log the live set at startup. 27 pytest green.
+Next:  (1) NAS RUNTIME: confirm claude/agy/copilot/codex + gh + tmux + python3.10 installed AND authed on the Ugreen NAS (workers run there). (2) File the storage.py OAuth protected-test gap issue before #12/#13. (3) Dry-run one agy/copilot dispatch of #12 end-to-end. (4) Then enable AUTODISPATCH.
+Blocked: NAS worker-runtime/token setup is owner action (interactive logins on the Mac; can't reach the NAS from this session).
+
+---
+
 ## 2026-06-23 · personal · agent
 Did:   Convergence: folded the smartocrprocess `orch/` prototype INTO relay (relay is the
        base; orch/ superseded). Added (1) LANES claude|agy|codex — pick_lane routes by

@@ -22,22 +22,57 @@ def _load(name):
 spawn = _load("relay_spawn")
 ctrl = _load("relay_control")
 finish = _load("relay_finish")
+lanes = _load("relay_lanes")
 from relay_board import Ticket  # noqa: E402
 
 
-# ------------------------------------------------------- lane routing
-def test_lane_override_wins():
-    assert spawn.pick_lane(["lane:codex"], "1", "agy") == "agy"
+# ------------------------------------------------------- lane configuration & availability
+def test_configured_lanes_default(monkeypatch):
+    monkeypatch.delenv("RELAY_LANES", raising=False)
+    monkeypatch.delenv("RELAY_LANE", raising=False)
+    assert lanes.configured_lanes() == ["claude"]
 
-def test_lane_from_label():
-    assert spawn.pick_lane(["lane:codex", "phase:4"], "1") == "codex"
+def test_configured_lanes_custom(monkeypatch):
+    monkeypatch.setenv("RELAY_LANES", "copilot,agy,invalid,claude")
+    assert lanes.configured_lanes() == ["copilot", "agy", "claude"]
 
-def test_tier2_forces_claude_even_with_cheap_label():
-    # sacred work never goes to a cheap lane, even if labeled
-    assert spawn.pick_lane(["lane:agy", "tier-2"], "2") == "claude"
+def test_strict_governance(monkeypatch):
+    monkeypatch.delenv("RELAY_STRICT_LANES", raising=False)
+    assert lanes.strict() is False
+    monkeypatch.setenv("RELAY_STRICT_LANES", "1")
+    assert lanes.strict() is True
+    monkeypatch.setenv("RELAY_STRICT_LANES", "false")
+    assert lanes.strict() is False
 
-def test_lane_default_is_claude():
-    assert spawn.pick_lane(["phase:2"], "1") == "claude"
+def test_available_lanes_uses_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RELAY_LANES", "copilot,claude")
+    
+    # Write a mock cache
+    cache = tmp_path / ".lanes.json"
+    import json, time
+    cache.write_text(json.dumps({"at": time.time(), "lanes": ["copilot"]}))
+    
+    # It should read from cache and filter by configured
+    assert lanes.available_lanes(refresh=False) == ["copilot"]
+
+def test_available_lanes_refreshes_and_writes_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RELAY_LANES", "copilot,claude")
+    import json
+    
+    # Mock auth_probe: only copilot is authed
+    monkeypatch.setattr(lanes, "auth_probe", lambda l: l == "copilot")
+    
+    # Should run auth_probe and write cache
+    assert lanes.available_lanes(refresh=True) == ["copilot"]
+    
+    # Verify cache file exists and has correct lanes
+    cache = tmp_path / ".lanes.json"
+    assert cache.exists()
+    data = json.loads(cache.read_text())
+    assert data["lanes"] == ["copilot"]
+
 
 
 # ------------------------------------------------------- evidence gate (safety-critical)
@@ -106,3 +141,51 @@ def test_finish_zero_beats_stale_ratelimit_text(tmp_path, monkeypatch):
     # a clean exit is DONE even if the log mentions limits earlier
     _fin(tmp_path, monkeypatch, "hit rate limit once, recovered\n")
     assert finish.classify("t1", "0") == "DONE"
+
+
+# ------------------------------------------------------- lane preference + resolution (§12)
+def test_pref_override_is_explicit():
+    assert lanes.lane_preference([], "agy") == ("agy", True)
+
+def test_pref_label_is_explicit():
+    assert lanes.lane_preference(["lane:codex", "phase:4"]) == ("codex", True)
+
+def test_pref_default_is_top_of_ladder_not_explicit(monkeypatch):
+    monkeypatch.setenv("RELAY_LANES", "copilot,claude")
+    assert lanes.lane_preference(["phase:2"]) == ("copilot", False)
+
+def test_tier2_forces_claude():
+    assert lanes.resolve_lane("agy", True, "2", ["copilot", "agy", "claude"], is_strict=False) \
+        == ("claude", "tier2-forced-claude")
+
+def test_tier2_waits_when_claude_unavailable():
+    lane, reason = lanes.resolve_lane("claude", True, "2", ["copilot", "agy"], is_strict=False)
+    assert lane is None and reason == "tier2-claude-unavailable"
+
+def test_preferred_when_available():
+    assert lanes.resolve_lane("agy", True, "1", ["copilot", "agy", "claude"], is_strict=False) \
+        == ("agy", "preferred")
+
+def test_substitute_down_ladder_when_unavailable():
+    assert lanes.resolve_lane("agy", True, "1", ["copilot", "claude"], is_strict=False) \
+        == ("copilot", "substitute:agy->copilot")
+
+def test_strict_holds_explicit_unsanctioned():
+    lane, reason = lanes.resolve_lane("agy", True, "1", ["claude"], is_strict=True)
+    assert lane is None and reason.startswith("strict-hold")
+
+def test_strict_does_not_hold_implicit_default():
+    # no-label issue at work just runs the sanctioned default — no hold
+    assert lanes.resolve_lane("copilot", False, "1", ["claude"], is_strict=True) \
+        == ("claude", "substitute:copilot->claude")
+
+def test_failover_picks_next_untried_lane():
+    # copilot capped (tried) -> next available untried is agy
+    assert lanes.resolve_lane("copilot", False, "1", ["copilot", "agy", "claude"],
+                              tried=["copilot"], is_strict=False) \
+        == ("agy", "substitute:copilot->agy")
+
+def test_failover_exhausted_when_all_tried():
+    lane, reason = lanes.resolve_lane("copilot", False, "1", ["copilot", "agy", "claude"],
+                                      tried=["copilot", "agy", "claude"], is_strict=False)
+    assert lane is None and reason == "all-lanes-exhausted"

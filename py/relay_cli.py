@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import relay_control as ctrl
 import relay_spawn as spawn
+import relay_lanes as lanes
 from relay_board import get_board
 
 
@@ -26,9 +27,20 @@ def cmd_watch(_argv: list[str]) -> int:
 
 
 def cmd_pull(_argv: list[str]) -> int:
+    avail = lanes.available_lanes()
     for t in get_board().pull_ready():
-        lane = spawn.pick_lane(t.labels, t.tier)
-        print(f"[{t.id}] tier-{t.tier}  lane={lane}  {t.title}")
+        pref, explicit = lanes.lane_preference(t.labels)
+        lane, reason = lanes.resolve_lane(pref, explicit, t.tier, avail)
+        tag = lane or f"HOLD ({reason})"
+        print(f"[{t.id}] tier-{t.tier}  lane={tag}  {t.title}")
+    return 0
+
+
+def cmd_lanes(argv: list[str]) -> int:
+    refresh = "--refresh" in argv
+    print(f"configured (RELAY_LANES): {', '.join(lanes.configured_lanes())}")
+    print(f"available (auth-checked): {', '.join(lanes.available_lanes(refresh=refresh)) or '(none)'}")
+    print(f"strict (work governance): {lanes.strict()}")
     return 0
 
 
@@ -49,6 +61,10 @@ def cmd_dispatch(argv: list[str]) -> int:
         print(f"ticket {ticket_id} not ready (must be agent-ready, not agent-wip)", file=sys.stderr)
         return 1
     task = ctrl.dispatch_ticket(ticket, project, lane_override=lane)
+    if task is None:
+        print(f"ticket {ticket_id} HELD — no lane could be resolved (see notify / `relay lanes`)",
+              file=sys.stderr)
+        return 1
     print(f"dispatched {task}")
     return 0
 
@@ -81,7 +97,7 @@ def cmd_note(argv: list[str]) -> int:
 
 
 COMMANDS = {"watch": cmd_watch, "pull": cmd_pull, "dispatch": cmd_dispatch,
-            "status": cmd_status, "note": cmd_note}
+            "status": cmd_status, "note": cmd_note, "lanes": cmd_lanes}
 
 
 def main() -> int:
