@@ -86,7 +86,7 @@ def _base_ref(project: str, default: str = "main") -> str:
 
 def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
           lane: str, title: str = "", requested: str | None = None,
-          explicit: bool = False) -> str:
+          explicit: bool = False, repo: str = "") -> str:
     """Create the worktree + branch, record meta, launch the lane's harness."""
     taskdir = DATA / task
     taskdir.mkdir(parents=True, exist_ok=True)
@@ -106,7 +106,7 @@ def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
 
     mode = _detect_mode()
     (taskdir / "meta.json").write_text(json.dumps({
-        "item": item, "tier": tier, "lane": lane, "mode": mode,
+        "item": item, "tier": tier, "lane": lane, "mode": mode, "repo": repo,
         "project": str(proj), "worktree": str(wt_abs), "branch": branch,
         "title": title, "requested": requested or lane, "explicit": explicit,
         "tried_lanes": [lane],

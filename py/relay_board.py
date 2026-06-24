@@ -43,8 +43,8 @@ class Board(ABC):
 class GitHubBoard(Board):
     """Wraps the GitHub CLI (`gh`). Uses your existing `gh auth login` — no PAT to manage.
     Requires `gh` installed and authenticated (run `gh auth status` to check)."""
-    def __init__(self) -> None:
-        self.repo = os.environ["GITHUB_REPO"]              # e.g. "ManikantaR/MoneyPulse"
+    def __init__(self, repo: str | None = None) -> None:
+        self.repo = repo or os.environ["GITHUB_REPO"]      # e.g. "ManikantaR/MoneyPulse"
 
     def _gh(self, *args: str) -> str:
         cmd = ["gh", *args, "--repo", self.repo]
@@ -120,5 +120,6 @@ class TFSBoard(Board):
         raise NotImplementedError("fill comment_pr() with your Add-PRComment.ps1 call")
 
 
-def get_board() -> Board:
-    return TFSBoard() if os.getenv("RELAY_PROFILE") == "work" else GitHubBoard()
+def get_board(repo: str | None = None) -> Board:
+    # work = one TFS board; personal = a GitHub board per repo (multi-repo registry).
+    return TFSBoard() if os.getenv("RELAY_PROFILE") == "work" else GitHubBoard(repo)

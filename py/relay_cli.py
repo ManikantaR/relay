@@ -28,11 +28,12 @@ def cmd_watch(_argv: list[str]) -> int:
 
 def cmd_pull(_argv: list[str]) -> int:
     avail = lanes.available_lanes()
-    for t in get_board().pull_ready():
-        pref, explicit = lanes.lane_preference(t.labels)
-        lane, reason = lanes.resolve_lane(pref, explicit, t.tier, avail)
-        tag = lane or f"HOLD ({reason})"
-        print(f"[{t.id}] tier-{t.tier}  lane={tag}  {t.title}")
+    for repo, _project in ctrl.projects():
+        for t in get_board(repo).pull_ready():
+            pref, explicit = lanes.lane_preference(t.labels)
+            lane, reason = lanes.resolve_lane(pref, explicit, t.tier, avail)
+            tag = lane or f"HOLD ({reason})"
+            print(f"[{repo}#{t.id}] tier-{t.tier}  lane={tag}  {t.title}")
     return 0
 
 
@@ -50,35 +51,52 @@ def _opt(argv: list[str], flag: str, default=None):
 
 def cmd_dispatch(argv: list[str]) -> int:
     if not argv:
-        print("usage: relay dispatch <ticket-id> [--project <path>] [--lane claude|agy|codex]",
-              file=sys.stderr)
+        print("usage: relay dispatch <ticket-id> [--repo owner/name] [--project <path>] "
+              "[--lane claude|agy|copilot|codex]", file=sys.stderr)
         return 2
     ticket_id = argv[0]
-    project = _opt(argv, "--project", ".")
-    lane = _opt(argv, "--lane")
-    ticket = next((t for t in get_board().pull_ready() if t.id == ticket_id), None)
-    if ticket is None:
-        print(f"ticket {ticket_id} not ready (must be agent-ready, not agent-wip)", file=sys.stderr)
-        return 1
-    task = ctrl.dispatch_ticket(ticket, project, lane_override=lane)
-    if task is None:
-        print(f"ticket {ticket_id} HELD — no lane could be resolved (see notify / `relay lanes`)",
-              file=sys.stderr)
-        return 1
-    print(f"dispatched {task}")
-    return 0
+    repo_opt, project_opt, lane = _opt(argv, "--repo"), _opt(argv, "--project"), _opt(argv, "--lane")
+    # which (repo, project) to search: an explicit --repo, else the whole registry
+    if repo_opt:
+        reg = dict(ctrl.projects())
+        candidates = [(repo_opt, project_opt or reg.get(repo_opt, "."))]
+    else:
+        candidates = ctrl.projects() or [("", project_opt or ".")]
+    for repo, project in candidates:
+        ticket = next((t for t in get_board(repo).pull_ready() if t.id == ticket_id), None)
+        if ticket is None:
+            continue
+        task = ctrl.dispatch_ticket(ticket, project_opt or project, repo, lane_override=lane)
+        if task is None:
+            print(f"{repo}#{ticket_id} HELD — no lane could be resolved (see `relay lanes`)",
+                  file=sys.stderr)
+            return 1
+        print(f"dispatched {task}")
+        return 0
+    print(f"ticket {ticket_id} not ready in any configured repo", file=sys.stderr)
+    return 1
 
 
 def cmd_status(_argv: list[str]) -> int:
     dd = ctrl.CFG.data_dir
     if not dd.exists():
         print("(no data dir)"); return 0
+    import json
     any_active = False
     for d in sorted(dd.iterdir()):
         if (d / "active").exists():
             any_active = True
             state, line = ctrl.stop_reason(d.name)
-            print(f"{d.name:16} {state.value:14} {line}")
+            meta = {}
+            mp = d / "meta.json"
+            if mp.exists():
+                try:
+                    meta = json.loads(mp.read_text())
+                except Exception:
+                    pass
+            repo = (meta.get("repo") or "").split("/")[-1] or "-"
+            lane = meta.get("lane", "-")
+            print(f"{d.name:22} {repo:16} {lane:8} {state.value:14} {line}")
     if not any_active:
         print("(no active workers)")
     return 0

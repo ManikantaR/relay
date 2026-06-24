@@ -11,7 +11,10 @@ services:
     environment:
       RELAY_PROFILE: personal
       RELAY_LANES: "copilot,agy,codex,claude"     # ordered ladder; claude is the floor
-      RELAY_PROJECT: /workspace/smartocrprocess   # auto-dispatch target (single repo for now)
+      RELAY_PROJECT: /workspace/smartocrprocess   # single-repo target (board = GITHUB_REPO)
+      # multi-repo: ONE watcher serving many repos round-robin under the shared cap.
+      # Overrides RELAY_PROJECT/GITHUB_REPO when set. Format: repo=path,repo=path
+      # RELAY_PROJECTS: "ManikantaR/smartocrprocess=/workspace/smartocrprocess,ManikantaR/MoneyPulse=/workspace/moneypulse"
       RELAY_AUTODISPATCH: "0"          # flip to 1 ONLY after a clean manual dry-run
       RELAY_MAX_WORKERS: "2"           # concurrency cap — raise slowly while watching NAS RAM
       DATA_DIR: /workspace/.relay-data # relay state on the persistent volume (survives rebuilds)

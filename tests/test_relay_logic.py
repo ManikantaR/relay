@@ -189,3 +189,26 @@ def test_failover_exhausted_when_all_tried():
     lane, reason = lanes.resolve_lane("copilot", False, "1", ["copilot", "agy", "claude"],
                                       tried=["copilot", "agy", "claude"], is_strict=False)
     assert lane is None and reason == "all-lanes-exhausted"
+
+
+# ------------------------------------------------------- multi-repo registry
+def test_task_id_is_repo_qualified_no_collision():
+    # same issue number in two repos must not collide
+    assert ctrl.task_id("ManikantaR/smartocrprocess", 12) == "smartocrprocess-12"
+    assert ctrl.task_id("Org/MoneyPulse", 12) == "moneypulse-12"
+    assert ctrl.task_id("a/x", 12) != ctrl.task_id("a/y", 12)
+
+def test_projects_parses_registry(monkeypatch):
+    monkeypatch.setenv("RELAY_PROJECTS", "a/b=/p1, c/d=/p2")
+    assert ctrl.projects() == [("a/b", "/p1"), ("c/d", "/p2")]
+
+def test_projects_falls_back_to_single_repo(monkeypatch):
+    monkeypatch.delenv("RELAY_PROJECTS", raising=False)
+    monkeypatch.setenv("GITHUB_REPO", "x/y")
+    monkeypatch.setattr(ctrl.CFG, "project", "/proj")
+    assert ctrl.projects() == [("x/y", "/proj")]
+
+def test_get_board_uses_passed_repo(monkeypatch):
+    import relay_board
+    monkeypatch.setenv("RELAY_PROFILE", "personal")
+    assert relay_board.get_board("owner/repo").repo == "owner/repo"

@@ -150,6 +150,7 @@ def close_out(task: str) -> None:
     meta = json.loads((taskdir / "meta.json").read_text()) if (taskdir / "meta.json").exists() else {}
     tier, item, branch = meta.get("tier", "1"), meta.get("item", ""), meta.get("branch", "")
     project, worktree = meta.get("project", "."), meta.get("worktree", "")
+    repo = meta.get("repo", "")
     title = meta.get("title", "") or f"relay {task}"
 
     ok, have = evidence_ok(task)
@@ -175,8 +176,8 @@ def close_out(task: str) -> None:
     body = (summary.read_text(encoding="utf-8") if summary.exists() else "")
     body += f"\n\nCloses #{item}\n\n_Lane {meta.get('lane','?')} · evidence-gated by relay · human merges._\n"
     try:
-        pr = get_board().file_pr(branch, f"{title} (#{item})", body, tier)
-        get_board().apply_label(item, "agent-review")
+        pr = get_board(repo).file_pr(branch, f"{title} (#{item})", body, tier)
+        get_board(repo).apply_label(item, "agent-review")
     except Exception as e:
         _notify_once("needs-decision", task, f"PR/label step failed: {e}")
         _clear_active(task)
@@ -266,24 +267,55 @@ def _active_count() -> int:
     return sum(1 for d in CFG.data_dir.iterdir() if (d / "active").exists())
 
 
+def _repo_slug(repo: str) -> str:
+    return repo.split("/")[-1].lower() if repo else "repo"
+
+
+def task_id(repo: str, issue) -> str:
+    """Repo-qualified task id — the same issue number in two repos never collides."""
+    return f"{_repo_slug(repo)}-{issue}"
+
+
+def projects() -> list[tuple[str, str]]:
+    """The (board-repo, project-path) pairs the auto-dispatcher serves. RELAY_PROJECTS is a
+    comma list of `repo=path`; falls back to the single GITHUB_REPO + RELAY_PROJECT."""
+    raw = os.getenv("RELAY_PROJECTS", "").strip()
+    if raw:
+        pairs = []
+        for pair in raw.split(","):
+            if "=" in pair:
+                repo, path = pair.split("=", 1)
+                pairs.append((repo.strip(), path.strip()))
+        return pairs
+    repo = os.getenv("GITHUB_REPO", "")
+    return [(repo, CFG.project or ".")] if repo else []
+
+
 def auto_dispatch() -> None:
-    """Opt-in (RELAY_AUTODISPATCH). Pure Python — no LLM, no idle tokens."""
-    if not (CFG.autodispatch and CFG.project):
+    """Opt-in (RELAY_AUTODISPATCH). Pure Python — no LLM, no idle tokens. Serves EVERY repo in
+    the registry, round-robin, under one global concurrency cap."""
+    if not CFG.autodispatch:
         return
     from relay_board import get_board
     active = _active_count()
-    if active >= CFG.max_workers:
-        return
-    for t in get_board().pull_ready():
+    for repo, project in projects():
         if active >= CFG.max_workers:
             break
-        if (CFG.data_dir / f"t{t.id}").exists():
+        try:
+            tickets = get_board(repo).pull_ready()
+        except Exception as e:
+            log.warning("pull from %s failed: %s", repo or "(default)", e)
             continue
-        if not _contract_ok(t):
-            log.info("skip t%s: incomplete contract (needs tier label + spec)", t.id)
-            continue
-        if dispatch_ticket(t, CFG.project):     # held tickets return None — don't count them
-            active += 1
+        for t in tickets:
+            if active >= CFG.max_workers:
+                break
+            if (CFG.data_dir / task_id(repo, t.id)).exists():
+                continue
+            if not _contract_ok(t):
+                log.info("skip %s#%s: incomplete contract (needs tier label + spec)", repo, t.id)
+                continue
+            if dispatch_ticket(t, project, repo):   # held tickets return None — don't count them
+                active += 1
 
 
 # --- dispatch one ticket (shared by manual `relay dispatch` and auto_dispatch) ------------
@@ -323,11 +355,12 @@ Tests pass, evidence complete, work committed on your branch. End `summary.md` w
 """
 
 
-def dispatch_ticket(ticket, project: str, lane_override: str | None = None) -> str | None:
+def dispatch_ticket(ticket, project: str, repo: str = "",
+                    lane_override: str | None = None) -> str | None:
     import relay_spawn as spawn
     import relay_lanes as lanes
     from relay_board import get_board
-    task = f"t{ticket.id}"
+    task = task_id(repo, ticket.id)
 
     preferred, explicit = lanes.lane_preference(getattr(ticket, "labels", []), lane_override)
     lane, reason = lanes.resolve_lane(preferred, explicit, ticket.tier, lanes.available_lanes())
@@ -349,9 +382,9 @@ def dispatch_ticket(ticket, project: str, lane_override: str | None = None) -> s
         title=ticket.title, item=ticket.id, tier=ticket.tier, body=ticket.body or "(no spec)",
         lane=lane, taskdir=taskdir.resolve(), evidence=evidence, tier2=tier2), encoding="utf-8")
 
-    get_board().apply_label(ticket.id, "agent-wip")     # control-plane mutates the board
+    get_board(repo).apply_label(ticket.id, "agent-wip")     # control-plane mutates the board
     mode = spawn.spawn(task, project, ticket.id, ticket.tier, str(brief), lane, ticket.title,
-                       requested=preferred, explicit=explicit)
+                       requested=preferred, explicit=explicit, repo=repo)
     tag = "" if reason == "preferred" else f" [{reason}]"        # never silent: announce subs
     notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}")
     memory_append(did=f"Dispatched {task} ({ticket.title}) tier-{ticket.tier} lane={lane}{tag}",

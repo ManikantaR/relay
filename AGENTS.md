@@ -233,8 +233,10 @@ RELAY_HEARTBEAT=600              # base fleet-review interval; backs off while i
 # --- lanes + autonomous dispatch (folded in from the orch prototype) ---
 RELAY_LANE=claude                # default lane when an issue carries no lane:* label
 RELAY_AUTODISPATCH=              # set to 1 to let the watch loop pull+dispatch agent-ready (opt-in)
-RELAY_PROJECT=                   # repo path the auto-dispatcher targets (single project per profile)
-RELAY_MAX_WORKERS=2              # concurrency cap on parallel workers (start 2-3)
+RELAY_PROJECT=                   # single-repo auto-dispatch target (board = GITHUB_REPO)
+RELAY_PROJECTS=                  # multi-repo: "owner/repo=path,owner/repo2=path2" — one watcher,
+                                 #   many boards round-robin under the shared cap. Overrides the single pair.
+RELAY_MAX_WORKERS=2              # GLOBAL concurrency cap across all issues AND repos (start 2-3)
 ```
 
 ## 12. Lanes + evidence-gated close-out (folded from orch)
