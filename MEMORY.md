@@ -16,6 +16,25 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-24 · personal · agent
+Did:   MULTI-REPO + UI. (1) Multi-repo: RELAY_PROJECTS="repo=path,..." registry -> projects();
+       get_board(repo) per-repo; auto_dispatch serves every repo round-robin under ONE global
+       RELAY_MAX_WORKERS cap; repo-qualified task ids (smartocrprocess-12 vs moneypulse-12);
+       dispatch/close_out/meta carry repo; CLI pull/dispatch/status repo-aware. (2) Machine feed:
+       `relay status|pull|lanes --json`. (3) Control verbs: `relay kill <task>`, `pause`/`resume`
+       (.paused flag, auto_dispatch honors it). (4) VS Code extension `vscode/` ("Relay Control"):
+       Workers tree + Mission Control webview + status bar + one-click pull/dispatch/kill/openPR/
+       pause/attach-terminal; LOCAL ONLY; transport-agnostic via `relay.execPrefix` (local now,
+       `ssh nas docker exec` / Remote-SSH later). 31 pytest green; manifests validated. Decision
+       (researched, Karpathy autonomy-slider-GUI + Boris terminal+notifications): full-control
+       dashboard as a VS Code EXTENSION (not a web server) — no exposed port, portable Mac+Windows.
+Next:  (a) Extension is SCAFFOLDED not built — `cd vscode && npm install && npm run compile`, F5 to
+       run; couldn't tsc here (no @types/vscode). Webview is basic — enrich to match the visual.
+       (b) Still: NAS runtime auth + dry-run #12 + enable AUTODISPATCH (unchanged).
+Blocked: extension needs local npm build (owner); NAS runtime auth (owner).
+
+---
+
+## 2026-06-24 · personal · agent
 Did:   Finished wiring and testing `relay_lanes.py` per AGENTS.md §12. Removed obsolete `pick_lane` function from `relay_spawn.py` and its tests in `test_relay_logic.py`. Added new comprehensive tests for lane configuration, strict governance, and caching/validation behavior. Wired startup lane validation into `relay_control.py`'s `run_loop` to perform a cheap auth-check, drop dead lanes, and log the live set at startup. 27 pytest green.
 Next:  (1) NAS RUNTIME: confirm claude/agy/copilot/codex + gh + tmux + python3.10 installed AND authed on the Ugreen NAS (workers run there). (2) File the storage.py OAuth protected-test gap issue before #12/#13. (3) Dry-run one agy/copilot dispatch of #12 end-to-end. (4) Then enable AUTODISPATCH.
 Blocked: NAS worker-runtime/token setup is owner action (interactive logins on the Mac; can't reach the NAS from this session).
