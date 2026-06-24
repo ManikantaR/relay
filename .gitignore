@@ -17,6 +17,10 @@ data/.lanes.json
 __pycache__/
 *.pyc
 .mypy_cache/
+# vscode extension build
+vscode/node_modules/
+vscode/out/
+vscode/*.vsix
 # os
 .DS_Store
 # per-project memory lives in each project's repo, not here

@@ -296,6 +296,8 @@ def auto_dispatch() -> None:
     the registry, round-robin, under one global concurrency cap."""
     if not CFG.autodispatch:
         return
+    if (CFG.data_dir / ".paused").exists():     # `relay pause` — owner stop button
+        return
     from relay_board import get_board
     active = _active_count()
     for repo, project in projects():

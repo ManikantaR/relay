@@ -10,7 +10,10 @@ Subcommands:
     note "<text>"      append an owner memory entry
 """
 from __future__ import annotations
+import json
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -26,22 +29,32 @@ def cmd_watch(_argv: list[str]) -> int:
     return 0
 
 
-def cmd_pull(_argv: list[str]) -> int:
+def cmd_pull(argv: list[str]) -> int:
     avail = lanes.available_lanes()
+    rows = []
     for repo, _project in ctrl.projects():
         for t in get_board(repo).pull_ready():
             pref, explicit = lanes.lane_preference(t.labels)
             lane, reason = lanes.resolve_lane(pref, explicit, t.tier, avail)
-            tag = lane or f"HOLD ({reason})"
-            print(f"[{repo}#{t.id}] tier-{t.tier}  lane={tag}  {t.title}")
+            rows.append({"repo": repo, "id": t.id, "tier": t.tier, "title": t.title,
+                         "lane": lane, "hold": None if lane else reason})
+    if "--json" in argv:
+        print(json.dumps(rows)); return 0
+    for r in rows:
+        tag = r["lane"] or f"HOLD ({r['hold']})"
+        print(f"[{r['repo']}#{r['id']}] tier-{r['tier']}  lane={tag}  {r['title']}")
     return 0
 
 
 def cmd_lanes(argv: list[str]) -> int:
-    refresh = "--refresh" in argv
-    print(f"configured (RELAY_LANES): {', '.join(lanes.configured_lanes())}")
-    print(f"available (auth-checked): {', '.join(lanes.available_lanes(refresh=refresh)) or '(none)'}")
-    print(f"strict (work governance): {lanes.strict()}")
+    data = {"configured": lanes.configured_lanes(),
+            "available": lanes.available_lanes(refresh="--refresh" in argv),
+            "strict": lanes.strict()}
+    if "--json" in argv:
+        print(json.dumps(data)); return 0
+    print(f"configured (RELAY_LANES): {', '.join(data['configured'])}")
+    print(f"available (auth-checked): {', '.join(data['available']) or '(none)'}")
+    print(f"strict (work governance): {data['strict']}")
     return 0
 
 
@@ -77,28 +90,38 @@ def cmd_dispatch(argv: list[str]) -> int:
     return 1
 
 
-def cmd_status(_argv: list[str]) -> int:
+def _workers() -> list[dict]:
+    """Live worker rows — the machine-readable feed any UI (VS Code ext, web) consumes."""
     dd = ctrl.CFG.data_dir
+    rows = []
     if not dd.exists():
-        print("(no data dir)"); return 0
-    import json
-    any_active = False
+        return rows
     for d in sorted(dd.iterdir()):
-        if (d / "active").exists():
-            any_active = True
-            state, line = ctrl.stop_reason(d.name)
-            meta = {}
-            mp = d / "meta.json"
-            if mp.exists():
-                try:
-                    meta = json.loads(mp.read_text())
-                except Exception:
-                    pass
-            repo = (meta.get("repo") or "").split("/")[-1] or "-"
-            lane = meta.get("lane", "-")
-            print(f"{d.name:22} {repo:16} {lane:8} {state.value:14} {line}")
-    if not any_active:
-        print("(no active workers)")
+        if not (d / "active").exists():
+            continue
+        state, line = ctrl.stop_reason(d.name)
+        meta = {}
+        mp = d / "meta.json"
+        if mp.exists():
+            try:
+                meta = json.loads(mp.read_text())
+            except Exception:
+                pass
+        rows.append({"task": d.name, "repo": meta.get("repo", ""), "issue": meta.get("item", ""),
+                     "lane": meta.get("lane", ""), "tier": meta.get("tier", ""),
+                     "state": state.value, "line": line, "branch": meta.get("branch", "")})
+    return rows
+
+
+def cmd_status(argv: list[str]) -> int:
+    workers = _workers()
+    if "--json" in argv:
+        print(json.dumps(workers)); return 0
+    if not workers:
+        print("(no active workers)"); return 0
+    for w in workers:
+        repo = (w["repo"] or "").split("/")[-1] or "-"
+        print(f"{w['task']:22} {repo:16} {w['lane'] or '-':8} {w['state']:14} {w['line']}")
     return 0
 
 
@@ -114,8 +137,35 @@ def cmd_note(argv: list[str]) -> int:
     return 0
 
 
+def cmd_kill(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay kill <task>", file=sys.stderr); return 2
+    task = argv[0]
+    subprocess.run(["tmux", "kill-window", "-t", f"relay:{task}"], capture_output=True)
+    td = ctrl.CFG.data_dir / task
+    if (td / "status.md").parent.exists():
+        with (td / "status.md").open("a", encoding="utf-8") as f:
+            f.write(f"ERROR killed-by-owner {datetime.now(timezone.utc).isoformat()}\n")
+    ctrl._clear_active(task)
+    print(f"killed {task}")
+    return 0
+
+
+def cmd_pause(_argv: list[str]) -> int:
+    (ctrl.CFG.data_dir / ".paused").touch()
+    print("auto-dispatch PAUSED (running workers continue; no new ones start)")
+    return 0
+
+
+def cmd_resume(_argv: list[str]) -> int:
+    (ctrl.CFG.data_dir / ".paused").unlink(missing_ok=True)
+    print("auto-dispatch RESUMED")
+    return 0
+
+
 COMMANDS = {"watch": cmd_watch, "pull": cmd_pull, "dispatch": cmd_dispatch,
-            "status": cmd_status, "note": cmd_note, "lanes": cmd_lanes}
+            "status": cmd_status, "note": cmd_note, "lanes": cmd_lanes,
+            "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}
 
 
 def main() -> int:
