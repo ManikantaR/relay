@@ -33,3 +33,19 @@ npm run compile
 
 Requires `relay` reachable per `relay.execPrefix`, and (for `--json` status) the relay control
 plane running. Consumes relay's machine-readable feed: `relay status|pull|lanes --json`.
+
+## Design notes (2026 best practice)
+- **Native-first.** The worker list is a native **TreeView**, actions are **commands +
+  context menus + QuickPick**, summary is the **status bar** — per VS Code UX guidelines
+  webviews are used *sparingly*. The single webview (Mission Control) earns its place by
+  showing the parallel picture the tree can't, plus one-click controls.
+- **No dead UI toolkit.** `@vscode/webview-ui-toolkit` was deprecated/archived (Jan 2025);
+  we hand-roll with **`--vscode-*` theme variables** (colors, fonts, chart colors, button
+  tokens) so the panel matches any theme with zero dependencies. (`@vscode-elements/elements`
+  is the modern component option if this grows.)
+- **Secure webview.** Content-Security-Policy + per-load **nonce** on style/script; no remote
+  resources; `getState`/`setState` instead of heavy `retainContextWhenHidden`.
+- **Accessible.** ARIA roles on the toolbar/table, visible focus ring, keyboard reachable;
+  F6 / Shift+F6 move between the webview and the workbench.
+- **Single source of truth.** Webview buttons post `command` messages that run the *same*
+  registered commands as the tree and palette — no duplicated logic.
