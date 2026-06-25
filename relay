@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # relay — entrypoint (Mac/Linux). Dispatches to the Python control plane.
+# Auto-selects a Python >= 3.10 (the system python3 may be older).
 set -euo pipefail
 cd "$(dirname "$0")"
-exec python3 py/relay_cli.py "$@"
+PY=""
+for c in python3.13 python3.12 python3.11 python3.10 python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys;exit(0 if sys.version_info>=(3,10) else 1)' 2>/dev/null; then
+    PY="$c"; break
+  fi
+done
+[ -n "$PY" ] || { echo "relay: needs Python 3.10+ (none found on PATH)" >&2; exit 1; }
+export RELAY_PYTHON="$PY"          # workers' finisher uses the same interpreter
+exec "$PY" py/relay_cli.py "$@"

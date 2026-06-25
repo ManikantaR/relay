@@ -50,7 +50,8 @@ def auth_probe(lane: str) -> bool:
         "codex": ["codex", "exec", "ok"],
     }
     try:
-        r = subprocess.run(cmds[lane], capture_output=True, text=True, timeout=90)
+        r = subprocess.run(cmds[lane], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                           timeout=int(os.getenv("RELAY_PROBE_TIMEOUT", "45")))
     except Exception:
         return False
     if r.returncode == 0:
