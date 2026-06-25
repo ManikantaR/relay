@@ -1,0 +1,29 @@
+name: vscode-extension
+
+# Compile-checks the Relay Control extension on every change to vscode/.
+# This is the green/red signal the local build environment can't produce (no VS Code types
+# without an install). First run may be RED — that's the point: it surfaces real type errors.
+
+on:
+  push:
+    paths:
+      - 'vscode/**'
+      - '.github/workflows/vscode-extension.yml'
+  pull_request:
+    paths:
+      - 'vscode/**'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # no committed lock file yet -> npm install; switch to `npm ci` once package-lock.json lands
+      - run: npm install --no-audit --no-fund
+      - run: npm run compile
