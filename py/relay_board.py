@@ -74,12 +74,15 @@ class GitHubBoard(Board):
         self._gh("pr", "comment", pr_id, "--body", text)
 
     def pull_review(self) -> list[dict]:
-        """Open PRs awaiting the owner (the kanban Review column). Not on the ABC — optional."""
-        raw = self._gh("pr", "list", "--label", "agent-review", "--state", "open",
-                       "--json", "number,title,labels,url")
+        """Open PRs awaiting the owner (the kanban Review column). Matches relay-opened PRs by
+        their `relay/` branch (robust) or the agent-review label. Not on the ABC — optional."""
+        raw = self._gh("pr", "list", "--state", "open",
+                       "--json", "number,title,labels,url,headRefName")
         out = []
         for it in json.loads(raw or "[]"):
             labels = [l["name"] for l in it.get("labels", [])]
+            if not (it.get("headRefName", "").startswith("relay/") or "agent-review" in labels):
+                continue
             out.append({"repo": self.repo, "id": str(it["number"]), "title": it["title"],
                         "tier": "2" if "tier-2" in labels else "1", "url": it.get("url", "")})
         return out
