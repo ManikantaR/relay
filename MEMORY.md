@@ -15,6 +15,21 @@ Blocked: <anything waiting, or "none">
 
 ---
 
+## 2026-06-25 · personal · agent
+Did:   UI: rebuilt the VS Code Mission Control webview as an AGENT KANBAN (Ready→Working→
+       Waiting→Review) — the convergent pattern (Vibe Kanban/Nimbalyst/Cline/Conductor), cards
+       auto-sort by state; Waiting≠stuck; Tier-2 "read every line". New `relay board --json`
+       ({ready,active,review} across repos) + GitHubBoard.pull_review(). Applied 2026 webview
+       best practice (CSP+nonce, --vscode-* theme vars, getState, a11y; Webview UI Toolkit is
+       dead — hand-rolled). Added `.github/workflows/vscode-extension.yml` (npm install + tsc).
+       **Extension now COMPILES GREEN in CI** (run 28138662531, 13s) — the local-tsc gap is
+       closed; it type-checks with strict TS. 31 pytest green.
+Next:  Owner: `cd vscode && npm install && F5` to run it live (CI already proved it compiles).
+       Then the still-pending real-world steps: NAS runtime auth + dry-run #12 + AUTODISPATCH.
+Blocked: none new (NAS runtime auth still owner action).
+
+---
+
 ## 2026-06-24 · personal · agent
 Did:   MULTI-REPO + UI. (1) Multi-repo: RELAY_PROJECTS="repo=path,..." registry -> projects();
        get_board(repo) per-repo; auto_dispatch serves every repo round-robin under ONE global
