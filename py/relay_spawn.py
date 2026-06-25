@@ -17,7 +17,7 @@ Linux/NAS). Lanes are fully supported on the tmux path (the NAS/Mac target); the
 work profile falls back to the claude lane.
 """
 from __future__ import annotations
-import json, os, platform, shutil, subprocess
+import json, os, platform, shlex, shutil, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -151,7 +151,9 @@ def _launch(task: str, wt: Path, taskdir: Path, tier: str, mode: str, lane: str)
         cmd = f"( {harness} ) 2>&1 | tee '{log}'; rc=${{PIPESTATUS[0]}}; {fin}"
         subprocess.run(["tmux", "new-session", "-d", "-s", "relay"], capture_output=True)
         subprocess.run(["tmux", "new-window", "-t", "relay", "-n", task, "-c", str(wt)])
-        subprocess.run(["tmux", "send-keys", "-t", f"relay:{task}", cmd, "C-m"])
+        # force bash: ${PIPESTATUS[0]} is bash 0-indexed; the user's tmux shell may be zsh
+        # (1-indexed), which silently yields an empty exit code and breaks the finisher.
+        subprocess.run(["tmux", "send-keys", "-t", f"relay:{task}", "bash -c " + shlex.quote(cmd), "C-m"])
 
 
 def probe() -> int:
