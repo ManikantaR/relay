@@ -47,9 +47,13 @@
     "configuration": {
       "title": "Relay",
       "properties": {
+        "relay.command": {
+          "type": "string", "default": "relay",
+          "description": "How to invoke relay. Use an absolute path (e.g. /Users/you/repo/relay/relay) if VS Code can't find `relay` on PATH — common when launched from the Dock on macOS."
+        },
         "relay.execPrefix": {
           "type": "string", "default": "",
-          "description": "Prefix before `relay` for every command. Empty = run locally (or inside the Remote-SSH host). For the NAS from a local VS Code: `ssh nas docker exec -i relay`."
+          "description": "Prefix before the relay command. Empty = run locally (or inside the Remote-SSH host). For the NAS from a local VS Code: `ssh nas docker exec -i`."
         },
         "relay.cwd": {
           "type": "string", "default": "",

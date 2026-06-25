@@ -21,6 +21,8 @@ __pycache__/
 vscode/node_modules/
 vscode/out/
 vscode/*.vsix
+# machine-specific workspace settings (absolute relay.command path)
+.vscode/
 # os
 .DS_Store
 # per-project memory lives in each project's repo, not here
