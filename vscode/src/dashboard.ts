@@ -1,16 +1,16 @@
 import * as vscode from 'vscode';
-import { Worker } from './workersView';
 
-// The one justified webview: the rich, at-a-glance "mission control". The worker LIST lives
-// in the native TreeView (accessible + fast, per VS Code UX guidelines); this panel earns its
-// place by showing the parallel picture the tree can't, with one-click controls.
-// Built per 2026 best practice: no dead UI Toolkit, --vscode-* theme variables, CSP + nonce,
-// getState (not retainContextWhenHidden), command buttons post back to the extension.
+// Mission Control = an agent KANBAN board (the convergent pattern across Vibe Kanban,
+// Nimbalyst, Cline, Conductor): columns are lifecycle states and cards sort themselves by
+// the worker's real state. Fed by `relay board --json` ({ready, active, review}).
+// The worker LIST stays a native TreeView; this webview earns its place as the board the
+// tree can't be. Best practice kept: --vscode-* variables, CSP + nonce, getState, a11y.
+
+export interface Board { ready: any[]; active: any[]; review: any[]; }
 
 function makeNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let s = '';
-  for (let i = 0; i < 32; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+  const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = ''; for (let i = 0; i < 32; i++) { s += c.charAt(Math.floor(Math.random() * c.length)); }
   return s;
 }
 
@@ -30,77 +30,91 @@ export class Dashboard {
 
   constructor(panel: vscode.WebviewPanel, ctx: vscode.ExtensionContext) {
     this.panel = panel;
-    panel.webview.html = this.html(panel.webview);
-    // in-webview buttons -> run the same commands as the tree/palette (single source of truth)
+    panel.webview.html = this.html();
     panel.webview.onDidReceiveMessage((m) => {
       if (m && m.type === 'command' && typeof m.command === 'string') {
-        vscode.commands.executeCommand(`relay.${m.command}`);
+        vscode.commands.executeCommand(`relay.${m.command}`, m.args);
       }
     }, null, ctx.subscriptions);
   }
 
-  update(workers: Worker[]): void {
-    this.panel.webview.postMessage({ type: 'workers', workers });
+  update(board: Board): void {
+    this.panel.webview.postMessage({ type: 'board', board });
   }
 
-  private html(_webview: vscode.Webview): string {
+  private html(): string {
     const n = makeNonce();
     const csp = `default-src 'none'; style-src 'nonce-${n}'; script-src 'nonce-${n}';`;
     return [
       '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
       `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
       `<style nonce="${n}">`,
-      ':root{color-scheme:light dark}',
-      'body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);',
-      '  font-size:var(--vscode-font-size);margin:0;padding:16px}',
+      'body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);font-size:var(--vscode-font-size);margin:0;padding:14px}',
       '.hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px}',
       'h2{font-weight:500;font-size:15px;margin:0}',
-      '.badge{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);',
-      '  border-radius:10px;padding:2px 9px;font-size:11px}',
+      '.badge{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:10px;padding:2px 9px;font-size:11px}',
       '.toolbar{margin-left:auto;display:flex;gap:6px}',
-      '.btn{font-family:inherit;font-size:12px;border:none;border-radius:2px;padding:4px 11px;',
-      '  cursor:pointer;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}',
+      '.btn{font-family:inherit;font-size:12px;border:none;border-radius:2px;padding:4px 11px;cursor:pointer;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}',
       '.btn:hover{background:var(--vscode-button-hoverBackground)}',
       '.btn.sec{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}',
       '.btn:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}',
-      '.row{display:grid;grid-template-columns:1.4fr 1fr .8fr 1.1fr 1.6fr;gap:10px;align-items:center;',
-      '  padding:8px 4px;border-bottom:1px solid var(--vscode-panel-border);',
-      '  font-family:var(--vscode-editor-font-family);font-size:12.5px}',
-      '.row.head{color:var(--vscode-descriptionForeground);font-size:11px;letter-spacing:.04em;',
-      '  font-family:var(--vscode-font-family)}',
-      '.mut{color:var(--vscode-descriptionForeground)}',
-      '.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle}',
-      '.d-blue{background:var(--vscode-charts-blue)}.d-green{background:var(--vscode-charts-green)}',
-      '.d-yellow{background:var(--vscode-charts-yellow)}.d-red{background:var(--vscode-charts-red)}',
-      '.d-purple{background:var(--vscode-charts-purple)}.d-fg{background:var(--vscode-descriptionForeground)}',
-      '.empty{color:var(--vscode-descriptionForeground);padding:18px 4px}',
-      '.foot{margin-top:14px;color:var(--vscode-descriptionForeground);font-size:11.5px}',
+      '.cols{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start}',
+      '.col{min-width:0}',
+      '.colh{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.04em;color:var(--vscode-descriptionForeground);padding:0 2px 8px;text-transform:uppercase}',
+      '.count{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:9px;padding:0 6px;font-size:10px}',
+      '.card{background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:5px;padding:9px 10px;margin-bottom:8px}',
+      '.card.attn{border-color:var(--vscode-charts-red)}',
+      '.t1{font-size:12.5px;color:var(--vscode-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.meta{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}',
+      '.chip{font-size:10.5px;border-radius:9px;padding:1px 7px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}',
+      '.chip.t2{background:var(--vscode-charts-purple);color:var(--vscode-editor-background)}',
+      '.mut{color:var(--vscode-descriptionForeground);font-size:11px}',
+      '.mono{font-family:var(--vscode-editor-font-family)}',
+      '.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}',
+      '.d-blue{background:var(--vscode-charts-blue)}.d-yellow{background:var(--vscode-charts-yellow)}',
+      '.d-red{background:var(--vscode-charts-red)}.d-purple{background:var(--vscode-charts-purple)}',
+      '.cardbtn{margin-top:8px;font-size:11px;border:none;border-radius:2px;padding:3px 9px;cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}',
+      '.cardbtn:hover{background:var(--vscode-button-hoverBackground);color:var(--vscode-button-foreground)}',
+      '.empty{color:var(--vscode-descriptionForeground);font-size:11px;padding:6px 2px}',
       '</style></head><body>',
-      '<div class="hdr"><h2>Relay — Mission Control</h2>',
-      '<span class="badge" id="summary">…</span>',
+      '<div class="hdr"><h2>Relay — Mission Control</h2><span class="badge" id="summary">…</span>',
       '<div class="toolbar" role="toolbar" aria-label="Relay actions">',
       '<button class="btn" data-cmd="pull" aria-label="Dispatch an issue">Dispatch…</button>',
       '<button class="btn sec" data-cmd="togglePause" aria-label="Pause or resume auto-dispatch">Pause / Resume</button>',
-      '<button class="btn sec" data-cmd="refresh" aria-label="Refresh">Refresh</button>',
+      '<button class="btn sec" data-cmd="refresh" aria-label="Refresh board">Refresh</button>',
       '</div></div>',
-      '<div id="rows" role="table" aria-label="Active workers"><div class="empty">Loading…</div></div>',
-      '<div class="foot">Workers update live · act on a worker from the Relay sidebar (right-click).</div>',
+      '<div class="cols" id="cols" role="list" aria-label="Workflow board"><div class="empty">Loading…</div></div>',
       `<script nonce="${n}">`,
       'const vscode=acquireVsCodeApi();',
-      'const rows=document.getElementById("rows"),sum=document.getElementById("summary");',
-      'const C={PROGRESS:"blue",RATE_LIMITED:"yellow",ERROR:"red",HELD:"purple",DONE:"green",MISSING:"fg"};',
-      'function esc(s){return (s||"").replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}',
-      'function render(ws){ws=ws||[];',
-      ' var held=ws.filter(function(w){return w.state==="HELD";}).length;',
-      ' sum.textContent=ws.length+" active"+(held?(" \\u00b7 "+held+" held"):"");',
-      ' if(!ws.length){rows.innerHTML="<div class=\\"empty\\">No active workers.</div>";return;}',
-      ' rows.innerHTML="<div class=\\"row head\\"><div>TASK</div><div>REPO</div><div>LANE</div><div>STATE</div><div>BRANCH</div></div>"',
-      '  +ws.map(function(w){var repo=(w.repo||"").split("/").pop()||"-";',
-      '   return "<div class=\\"row\\" role=\\"row\\"><div>"+esc(w.task)+"</div><div>"+esc(repo)+"</div><div>"+esc(w.lane||"-")',
-      '   +"</div><div><span class=\\"dot d-"+(C[w.state]||"fg")+"\\"></span>"+esc(w.state)+"</div><div class=\\"mut\\">"+esc(w.branch||"")+"</div></div>";',
-      '  }).join("");}',
-      'window.addEventListener("message",function(e){if(e.data&&e.data.type==="workers"){vscode.setState(e.data.workers);render(e.data.workers);}});',
-      'Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"),function(b){b.addEventListener("click",function(){vscode.postMessage({type:"command",command:b.getAttribute("data-cmd")});});});',
+      'const root=document.getElementById("cols"),sum=document.getElementById("summary");',
+      'function esc(s){return (s||"").replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}',
+      'function send(command,args){vscode.postMessage({type:"command",command:command,args:args});}',
+      'function t2(t){return t==="2"?"<span class=\\"chip t2\\">tier-2</span>":"";}',
+      'function readyCard(r){var lane=r.lane?("<span class=\\"chip\\">"+esc(r.lane)+"</span>"):"<span class=\\"chip\\">HOLD</span>";',
+      ' return "<div class=\\"card\\"><div class=\\"t1\\">"+esc(r.title)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc(r.repo.split("/").pop())+"#"+esc(r.id)+"</span>"+t2(r.tier)+lane+"</div>'
+        + '<button class=\\"cardbtn\\" data-act=\\"dispatch\\" data-id=\\""+esc(r.id)+"\\" data-repo=\\""+esc(r.repo)+"\\">Dispatch</button></div>";}',
+      'function workerCard(w,attn){var C={PROGRESS:"blue",RATE_LIMITED:"yellow",ERROR:"red",HELD:"purple"};',
+      ' return "<div class=\\"card"+(attn?" attn":"")+"\\"><div class=\\"t1 mono\\">"+esc(w.task)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((w.repo||"").split("/").pop())+"</span>'
+        + '<span class=\\"chip\\">"+esc(w.lane||"-")+"</span><span class=\\"mut\\"><span class=\\"dot d-"+(C[w.state]||"blue")+"\\"></span>"+esc(w.state)+"</span></div>'
+        + '<div class=\\"mut mono\\" style=\\"margin-top:5px\\">"+esc(w.branch||"")+"</div></div>";}',
+      'function reviewCard(p){return "<div class=\\"card\\"><div class=\\"t1\\">"+esc(p.title)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((p.repo||"").split("/").pop())+"#"+esc(p.id)+"</span>"+t2(p.tier)+"</div>'
+        + '<button class=\\"cardbtn\\" data-act=\\"open\\" data-url=\\""+esc(p.url)+"\\">"+(p.tier==="2"?"Read every line":"Review PR")+"</button></div>";}',
+      'function col(name,count,inner){return "<div class=\\"col\\" role=\\"listitem\\"><div class=\\"colh\\">"+name+"<span class=\\"count\\">"+count+"</span></div>"+(inner||"<div class=\\"empty\\">—</div>")+"</div>";}',
+      'function render(b){b=b||{ready:[],active:[],review:[]};',
+      ' var working=b.active.filter(function(w){return w.state==="PROGRESS"||w.state==="MISSING";});',
+      ' var waiting=b.active.filter(function(w){return w.state==="RATE_LIMITED";});',
+      ' var attn=b.active.filter(function(w){return w.state==="ERROR"||w.state==="HELD";});',
+      ' sum.textContent=b.active.length+" active \\u00b7 "+b.review.length+" in review";',
+      ' root.innerHTML=col("Ready",b.ready.length,b.ready.map(readyCard).join(""))',
+      '  +col("Working",working.length,working.map(function(w){return workerCard(w,false);}).join(""))',
+      '  +col("Waiting",waiting.length,waiting.map(function(w){return workerCard(w,false);}).join(""))',
+      '  +col("Review",b.review.length+attn.length,attn.map(function(w){return workerCard(w,true);}).join("")+b.review.map(reviewCard).join(""));',
+      ' Array.prototype.forEach.call(root.querySelectorAll("[data-act]"),function(el){el.addEventListener("click",function(){',
+      '   var a=el.getAttribute("data-act");',
+      '   if(a==="dispatch")send("dispatchId",{id:el.getAttribute("data-id"),repo:el.getAttribute("data-repo")});',
+      '   else if(a==="open")send("openUrl",{url:el.getAttribute("data-url")});});});}',
+      'window.addEventListener("message",function(e){if(e.data&&e.data.type==="board"){vscode.setState(e.data.board);render(e.data.board);}});',
+      'Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"),function(b){b.addEventListener("click",function(){send(b.getAttribute("data-cmd"));});});',
       'render(vscode.getState());',
       '</script></body></html>',
     ].join('\n');

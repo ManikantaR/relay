@@ -73,6 +73,17 @@ class GitHubBoard(Board):
     def comment_pr(self, pr_id: str, text: str) -> None:
         self._gh("pr", "comment", pr_id, "--body", text)
 
+    def pull_review(self) -> list[dict]:
+        """Open PRs awaiting the owner (the kanban Review column). Not on the ABC — optional."""
+        raw = self._gh("pr", "list", "--label", "agent-review", "--state", "open",
+                       "--json", "number,title,labels,url")
+        out = []
+        for it in json.loads(raw or "[]"):
+            labels = [l["name"] for l in it.get("labels", [])]
+            out.append({"repo": self.repo, "id": str(it["number"]), "title": it["title"],
+                        "tier": "2" if "tier-2" in labels else "1", "url": it.get("url", "")})
+        return out
+
 
 # --------------------- Azure DevOps / TFS (work) — SKELETON: FILL AT WORK ---------------------
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { WorkersProvider, Worker } from './workersView';
 import { runRelay, runRelayJson, execPrefix } from './relay';
-import { Dashboard } from './dashboard';
+import { Dashboard, Board } from './dashboard';
 
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new WorkersProvider();
@@ -11,20 +11,28 @@ export function activate(ctx: vscode.ExtensionContext): void {
   status.command = 'relay.openDashboard';
   ctx.subscriptions.push(status);
 
+  // Fast, file-cheap: the tree + status bar (relay status reads disk).
   const refresh = async (): Promise<void> => {
     const ws = await provider.load();
     const held = ws.filter(w => w.state === 'HELD').length;
     status.text = `$(rocket) relay: ${ws.length} active${held ? ` · ${held} held` : ''}`;
     status.tooltip = 'Relay mission control';
     status.show();
-    Dashboard.current?.update(ws);
+  };
+
+  // Slower, gh-backed: the kanban board (Ready/Review hit the board API).
+  const refreshBoard = async (): Promise<void> => {
+    if (!Dashboard.current) { return; }
+    let b: Board = { ready: [], active: [], review: [] };
+    try { b = (await runRelayJson<Board>('board')) ?? b; } catch { /* keep last */ }
+    Dashboard.current.update(b);
   };
 
   const reg = (id: string, fn: (...a: any[]) => any) =>
     ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
-  reg('relay.refresh', refresh);
-  reg('relay.openDashboard', () => Dashboard.show(ctx, refresh));
+  reg('relay.refresh', () => { refresh(); refreshBoard(); });
+  reg('relay.openDashboard', () => Dashboard.show(ctx, () => { refresh(); refreshBoard(); }));
 
   const dispatch = async (id?: string, repo?: string): Promise<void> => {
     if (!id) { id = await vscode.window.showInputBox({ prompt: 'Issue id to dispatch' }); }
@@ -36,10 +44,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
     try {
       const out = await runRelay(`dispatch ${id}${repoArg}${laneArg}`);
       vscode.window.showInformationMessage(out.trim());
-      refresh();
+      refresh(); refreshBoard();
     } catch (e: any) { vscode.window.showErrorMessage(`dispatch: ${e.message}`); }
   };
   reg('relay.dispatch', () => dispatch());
+  // card actions from the kanban webview
+  reg('relay.dispatchId', (a: { id: string; repo?: string }) => dispatch(a?.id, a?.repo));
+  reg('relay.openUrl', (a: { url: string }) => { if (a?.url) { vscode.env.openExternal(vscode.Uri.parse(a.url)); } });
 
   reg('relay.pull', async () => {
     let rows: any[] = [];
@@ -61,7 +72,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ok = await vscode.window.showWarningMessage(`Kill worker ${w.task}?`, { modal: true }, 'Kill');
     if (ok !== 'Kill') { return; }
     try { await runRelay(`kill ${w.task}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); }
-    refresh();
+    refresh(); refreshBoard();
   });
 
   reg('relay.openPR', (w: Worker) => {
@@ -77,6 +88,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     } catch (e: any) { vscode.window.showErrorMessage(e.message); }
   });
 
+  reg('relay.refreshBoard', refreshBoard);
+
   reg('relay.attachTerminal', (w: Worker) => {
     if (!w?.task) { return; }
     const t = vscode.window.createTerminal(`relay ${w.task}`);
@@ -88,8 +101,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   refresh().catch(() => {});
   const sec = Math.max(2, vscode.workspace.getConfiguration('relay').get<number>('pollSeconds', 5));
-  const timer = setInterval(() => refresh().catch(() => {}), sec * 1000);
-  ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
+  const fast = setInterval(() => refresh().catch(() => {}), sec * 1000);
+  // the board hits the gh API — poll it slower, only while the dashboard is open
+  const slow = setInterval(() => { if (Dashboard.current) { refreshBoard().catch(() => {}); } }, Math.max(15, sec * 4) * 1000);
+  ctx.subscriptions.push({ dispose: () => { clearInterval(fast); clearInterval(slow); } });
 }
 
 export function deactivate(): void { /* no-op */ }

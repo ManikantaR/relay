@@ -35,10 +35,15 @@ Requires `relay` reachable per `relay.execPrefix`, and (for `--json` status) the
 plane running. Consumes relay's machine-readable feed: `relay status|pull|lanes --json`.
 
 ## Design notes (2026 best practice)
+- **Agent kanban.** Mission Control is a board — `Ready → Working → Waiting → Review` — the
+  convergent pattern across Vibe Kanban / Nimbalyst / Cline / Conductor: cards auto-sort by the
+  worker's real state. It surfaces what a table buries — the **Review** column (held PRs that
+  need *you*), **Waiting ≠ stuck** (rate-limited, probing), and the **Tier-2 read-every-line**
+  gate. Fed by `relay board --json` ({ready, active, review} across all repos).
 - **Native-first.** The worker list is a native **TreeView**, actions are **commands +
   context menus + QuickPick**, summary is the **status bar** — per VS Code UX guidelines
-  webviews are used *sparingly*. The single webview (Mission Control) earns its place by
-  showing the parallel picture the tree can't, plus one-click controls.
+  webviews are used *sparingly*. The one webview (the kanban) earns its place as the board the
+  tree can't be.
 - **No dead UI toolkit.** `@vscode/webview-ui-toolkit` was deprecated/archived (Jan 2025);
   we hand-roll with **`--vscode-*` theme variables** (colors, fonts, chart colors, button
   tokens) so the panel matches any theme with zero dependencies. (`@vscode-elements/elements`

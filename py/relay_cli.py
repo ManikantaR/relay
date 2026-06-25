@@ -46,6 +46,31 @@ def cmd_pull(argv: list[str]) -> int:
     return 0
 
 
+def cmd_board(argv: list[str]) -> int:
+    """The kanban feed: Ready (agent-ready) · Working/Waiting (active workers) · Review (PRs)."""
+    avail = lanes.available_lanes()
+    ready, review = [], []
+    for repo, _project in ctrl.projects():
+        b = get_board(repo)
+        try:
+            for t in b.pull_ready():
+                pref, explicit = lanes.lane_preference(t.labels)
+                lane, reason = lanes.resolve_lane(pref, explicit, t.tier, avail)
+                ready.append({"repo": repo, "id": t.id, "tier": t.tier, "title": t.title,
+                              "lane": lane, "hold": None if lane else reason})
+        except Exception:
+            pass
+        try:
+            review += getattr(b, "pull_review", lambda: [])()
+        except Exception:
+            pass
+    data = {"ready": ready, "active": _workers(), "review": review}
+    if "--json" in argv:
+        print(json.dumps(data)); return 0
+    print(f"ready:{len(ready)}  active:{len(data['active'])}  review:{len(review)}")
+    return 0
+
+
 def cmd_lanes(argv: list[str]) -> int:
     data = {"configured": lanes.configured_lanes(),
             "available": lanes.available_lanes(refresh="--refresh" in argv),
@@ -164,7 +189,7 @@ def cmd_resume(_argv: list[str]) -> int:
 
 
 COMMANDS = {"watch": cmd_watch, "pull": cmd_pull, "dispatch": cmd_dispatch,
-            "status": cmd_status, "note": cmd_note, "lanes": cmd_lanes,
+            "status": cmd_status, "board": cmd_board, "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}
 
 
