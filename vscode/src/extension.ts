@@ -2,6 +2,11 @@ import * as vscode from 'vscode';
 import { WorkersProvider, Worker } from './workersView';
 import { runRelay, runRelayJson, execPrefix } from './relay';
 import { Dashboard, Board } from './dashboard';
+import { PeekPanel } from './peekPanel';
+
+function taskOf(arg: any): string | undefined {
+  return typeof arg === 'string' ? arg : arg?.task;
+}
 
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new WorkersProvider();
@@ -77,6 +82,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   reg('relay.openPR', (w: Worker) => {
     if (w?.repo) { vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${w.repo}/pulls`)); }
+  });
+
+  reg('relay.peek', (arg: any) => { const t = taskOf(arg); if (t) { PeekPanel.show(ctx, t); } });
+
+  reg('relay.viewDiff', async (arg: any) => {
+    const t = taskOf(arg);
+    if (!t) { return; }
+    let patch = '';
+    try { patch = await runRelay(`diff ${t}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); return; }
+    const doc = await vscode.workspace.openTextDocument({
+      content: patch.trim() || '(no changes yet)', language: 'diff',
+    });
+    vscode.window.showTextDocument(doc, { preview: true });
   });
 
   let paused = false;

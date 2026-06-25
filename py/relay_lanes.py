@@ -14,8 +14,8 @@ from pathlib import Path
 
 LANES = ("claude", "agy", "copilot", "codex")
 BIN = {"claude": "claude", "agy": "agy", "copilot": "copilot", "codex": "codex"}
-_RATE = ("rate limit", "ratelimit", "quota", "usage limit", "429", "too many requests",
-         "overloaded")
+_RATE = ("rate limit", "ratelimit", "quota", "usage limit", "session limit", "limit reached",
+         "429", "too many requests", "overloaded")
 
 
 def configured_lanes() -> list[str]:

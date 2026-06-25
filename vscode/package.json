@@ -5,62 +5,156 @@
   "version": "0.1.0",
   "publisher": "manikantar",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/ManikantaR/relay.git" },
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ManikantaR/relay.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "relay", "title": "Relay", "icon": "media/relay.svg" }
+        {
+          "id": "relay",
+          "title": "Relay",
+          "icon": "media/relay.svg"
+        }
       ]
     },
     "views": {
       "relay": [
-        { "id": "relayWorkers", "name": "Workers" }
+        {
+          "id": "relayWorkers",
+          "name": "Workers"
+        }
       ]
     },
     "commands": [
-      { "command": "relay.refresh", "title": "Relay: Refresh", "icon": "$(refresh)" },
-      { "command": "relay.openDashboard", "title": "Relay: Open Mission Control", "icon": "$(dashboard)" },
-      { "command": "relay.pull", "title": "Relay: Pull & Dispatch…", "icon": "$(cloud-download)" },
-      { "command": "relay.dispatch", "title": "Relay: Dispatch Issue…" },
-      { "command": "relay.killWorker", "title": "Relay: Kill Worker", "icon": "$(trash)" },
-      { "command": "relay.attachTerminal", "title": "Relay: Attach Terminal", "icon": "$(terminal)" },
-      { "command": "relay.openPR", "title": "Relay: Open PRs", "icon": "$(git-pull-request)" },
-      { "command": "relay.togglePause", "title": "Relay: Pause/Resume Auto-dispatch", "icon": "$(debug-pause)" }
+      {
+        "command": "relay.refresh",
+        "title": "Relay: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "relay.openDashboard",
+        "title": "Relay: Open Mission Control",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "relay.pull",
+        "title": "Relay: Pull & Dispatch…",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "relay.dispatch",
+        "title": "Relay: Dispatch Issue…"
+      },
+      {
+        "command": "relay.killWorker",
+        "title": "Relay: Kill Worker",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "relay.attachTerminal",
+        "title": "Relay: Attach Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "relay.openPR",
+        "title": "Relay: Open PRs",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "relay.togglePause",
+        "title": "Relay: Pause/Resume Auto-dispatch",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "relay.peek",
+        "title": "Relay: Peek Worker",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "relay.viewDiff",
+        "title": "Relay: View Diff",
+        "icon": "$(git-compare)"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "relay.openDashboard", "when": "view == relayWorkers", "group": "navigation@1" },
-        { "command": "relay.pull", "when": "view == relayWorkers", "group": "navigation@2" },
-        { "command": "relay.togglePause", "when": "view == relayWorkers", "group": "navigation@3" },
-        { "command": "relay.refresh", "when": "view == relayWorkers", "group": "navigation@4" }
+        {
+          "command": "relay.openDashboard",
+          "when": "view == relayWorkers",
+          "group": "navigation@1"
+        },
+        {
+          "command": "relay.pull",
+          "when": "view == relayWorkers",
+          "group": "navigation@2"
+        },
+        {
+          "command": "relay.togglePause",
+          "when": "view == relayWorkers",
+          "group": "navigation@3"
+        },
+        {
+          "command": "relay.refresh",
+          "when": "view == relayWorkers",
+          "group": "navigation@4"
+        }
       ],
       "view/item/context": [
-        { "command": "relay.attachTerminal", "when": "view == relayWorkers", "group": "inline@1" },
-        { "command": "relay.openPR", "when": "view == relayWorkers && viewItem == worker-held", "group": "inline@2" },
-        { "command": "relay.killWorker", "when": "view == relayWorkers", "group": "inline@3" }
+        {
+          "command": "relay.peek",
+          "when": "view == relayWorkers",
+          "group": "inline@0"
+        },
+        {
+          "command": "relay.attachTerminal",
+          "when": "view == relayWorkers",
+          "group": "inline@1"
+        },
+        {
+          "command": "relay.openPR",
+          "when": "view == relayWorkers && viewItem == worker-held",
+          "group": "inline@2"
+        },
+        {
+          "command": "relay.killWorker",
+          "when": "view == relayWorkers",
+          "group": "inline@3"
+        }
       ]
     },
     "configuration": {
       "title": "Relay",
       "properties": {
         "relay.command": {
-          "type": "string", "default": "relay",
+          "type": "string",
+          "default": "relay",
           "description": "How to invoke relay. Use an absolute path (e.g. /Users/you/repo/relay/relay) if VS Code can't find `relay` on PATH — common when launched from the Dock on macOS."
         },
         "relay.execPrefix": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Prefix before the relay command. Empty = run locally (or inside the Remote-SSH host). For the NAS from a local VS Code: `ssh nas docker exec -i`."
         },
         "relay.cwd": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Working directory for relay (defaults to the first workspace folder)."
         },
         "relay.pollSeconds": {
-          "type": "number", "default": 5,
+          "type": "number",
+          "default": 5,
           "description": "How often to refresh worker status (seconds)."
         }
       }
@@ -72,8 +166,11 @@
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/vscode": "^1.90.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@xterm/xterm": "^6.0.0"
   }
 }

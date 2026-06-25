@@ -69,6 +69,7 @@ export class Dashboard {
       '.chip{font-size:10.5px;border-radius:9px;padding:1px 7px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}',
       '.chip.t2{background:var(--vscode-charts-purple);color:var(--vscode-editor-background)}',
       '.mut{color:var(--vscode-descriptionForeground);font-size:11px}',
+      '.now{font-family:var(--vscode-editor-font-family);font-size:11px;color:var(--vscode-foreground);margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.mono{font-family:var(--vscode-editor-font-family)}',
       '.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}',
       '.d-blue{background:var(--vscode-charts-blue)}.d-yellow{background:var(--vscode-charts-yellow)}',
@@ -94,9 +95,7 @@ export class Dashboard {
       ' return "<div class=\\"card\\"><div class=\\"t1\\">"+esc(r.title)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc(r.repo.split("/").pop())+"#"+esc(r.id)+"</span>"+t2(r.tier)+lane+"</div>'
         + '<button class=\\"cardbtn\\" data-act=\\"dispatch\\" data-id=\\""+esc(r.id)+"\\" data-repo=\\""+esc(r.repo)+"\\">Dispatch</button></div>";}',
       'function workerCard(w,attn){var C={PROGRESS:"blue",RATE_LIMITED:"yellow",ERROR:"red",HELD:"purple"};',
-      ' return "<div class=\\"card"+(attn?" attn":"")+"\\"><div class=\\"t1 mono\\">"+esc(w.task)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((w.repo||"").split("/").pop())+"</span>'
-        + '<span class=\\"chip\\">"+esc(w.lane||"-")+"</span><span class=\\"mut\\"><span class=\\"dot d-"+(C[w.state]||"blue")+"\\"></span>"+esc(w.state)+"</span></div>'
-        + '<div class=\\"mut mono\\" style=\\"margin-top:5px\\">"+esc(w.branch||"")+"</div></div>";}',
+      ' return "<div class=\\"card"+(attn?" attn":"")+"\\"><div class=\\"t1 mono\\">"+esc(w.task)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((w.repo||"").split("/").pop())+"</span><span class=\\"chip\\">"+esc(w.lane||"-")+"</span><span class=\\"mut\\"><span class=\\"dot d-"+(C[w.state]||"blue")+"\\"></span>"+esc(w.state)+"</span></div>"+(w.now?"<div class=\\"now\\">"+esc(w.now)+"</div>":"")+"<button class=\\"cardbtn\\" data-act=\\"peek\\" data-task=\\""+esc(w.task)+"\\">Peek</button></div>";}',
       'function reviewCard(p){return "<div class=\\"card\\"><div class=\\"t1\\">"+esc(p.title)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((p.repo||"").split("/").pop())+"#"+esc(p.id)+"</span>"+t2(p.tier)+"</div>'
         + '<button class=\\"cardbtn\\" data-act=\\"open\\" data-url=\\""+esc(p.url)+"\\">"+(p.tier==="2"?"Read every line":"Review PR")+"</button></div>";}',
       'function col(name,count,inner){return "<div class=\\"col\\" role=\\"listitem\\"><div class=\\"colh\\">"+name+"<span class=\\"count\\">"+count+"</span></div>"+(inner||"<div class=\\"empty\\">—</div>")+"</div>";}',
@@ -112,7 +111,8 @@ export class Dashboard {
       ' Array.prototype.forEach.call(root.querySelectorAll("[data-act]"),function(el){el.addEventListener("click",function(){',
       '   var a=el.getAttribute("data-act");',
       '   if(a==="dispatch")send("dispatchId",{id:el.getAttribute("data-id"),repo:el.getAttribute("data-repo")});',
-      '   else if(a==="open")send("openUrl",{url:el.getAttribute("data-url")});});});}',
+      '   else if(a==="open")send("openUrl",{url:el.getAttribute("data-url")});',
+      '   else if(a==="peek")send("peek",{task:el.getAttribute("data-task")});});});}',
       'window.addEventListener("message",function(e){if(e.data&&e.data.type==="board"){vscode.setState(e.data.board);render(e.data.board);}});',
       'Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"),function(b){b.addEventListener("click",function(){send(b.getAttribute("data-cmd"));});});',
       'render(vscode.getState());',
