@@ -128,23 +128,26 @@ def resume(task: str) -> None:
 
 
 def _launch(task: str, wt: Path, taskdir: Path, tier: str, mode: str, lane: str) -> None:
-    brief = taskdir / "brief.md"
-    log = taskdir / "worker.log"
+    # ABSOLUTE paths: the worker runs in the worktree cwd, not the relay dir, so brief/log/
+    # DATA_DIR must be absolute or `cat`/`tee`/the finisher resolve against the wrong directory.
+    brief = (taskdir / "brief.md").resolve()
+    log = (taskdir / "worker.log").resolve()
+    data_abs = DATA.resolve()
     harness = _harness_cmd(lane, brief, mode)
     color = "#D13438" if tier == "2" else "#0F7B0F"          # red Tier-2, green Tier-1
     # finisher classifies the exit (DONE/RATE_LIMITED/ERROR) — off the agent's goodwill.
     if mode == "wt-tab":
-        fin = f"{PY} {HERE / 'relay_finish.py'} {task} $LASTEXITCODE"
+        fin = f"$env:DATA_DIR='{data_abs}'; {PY} {HERE / 'relay_finish.py'} {task} $LASTEXITCODE"
         subprocess.run(["wt", "new-tab", "-t", f"relay-{task}", "-c", color,
                         "powershell.exe", "-Command",
                         f"Set-Location '{wt}'; {harness} *>&1 | Tee-Object -FilePath '{log}'; {fin}"])
     elif mode == "bg-job":
-        fin = f"{PY} {HERE / 'relay_finish.py'} {task} $LASTEXITCODE"
+        fin = f"$env:DATA_DIR='{data_abs}'; {PY} {HERE / 'relay_finish.py'} {task} $LASTEXITCODE"
         subprocess.run(["powershell.exe", "-Command",
                         f"Start-Job -Name relay-{task} -ScriptBlock {{ Set-Location '{wt}'; "
                         f"{harness} *>&1 | Tee-Object -FilePath '{log}'; {fin} }}"])
     else:  # tmux (Mac/Linux/NAS) — full lane support
-        fin = f"{PY} '{HERE / 'relay_finish.py'}' {task} $rc"
+        fin = f"DATA_DIR='{data_abs}' {PY} '{HERE / 'relay_finish.py'}' {task} $rc"
         cmd = f"( {harness} ) 2>&1 | tee '{log}'; rc=${{PIPESTATUS[0]}}; {fin}"
         subprocess.run(["tmux", "new-session", "-d", "-s", "relay"], capture_output=True)
         subprocess.run(["tmux", "new-window", "-t", "relay", "-n", task, "-c", str(wt)])
