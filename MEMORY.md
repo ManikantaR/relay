@@ -16,6 +16,11 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-25 · personal · agent
+Did:     smartocrprocess-40 done -> PR 41 (tier-1, lane copilot)
+Next:    Owner: skim + merge.
+Blocked: none
+
+## 2026-06-25 · personal · agent
 Did:   UI: rebuilt the VS Code Mission Control webview as an AGENT KANBAN (Ready→Working→
        Waiting→Review) — the convergent pattern (Vibe Kanban/Nimbalyst/Cline/Conductor), cards
        auto-sort by state; Waiting≠stuck; Tier-2 "read every line". New `relay board --json`
