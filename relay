@@ -2,7 +2,16 @@
 # relay — entrypoint (Mac/Linux). Dispatches to the Python control plane.
 # Auto-selects a Python >= 3.10 (the system python3 may be older).
 set -euo pipefail
-cd "$(dirname "$0")"
+# resolve symlinks so `relay` works when symlinked onto PATH (e.g. ~/.local/bin/relay)
+SRC="$0"
+while [ -h "$SRC" ]; do
+  D="$(cd -P "$(dirname "$SRC")" && pwd)"; SRC="$(readlink "$SRC")"
+  case "$SRC" in /*) ;; *) SRC="$D/$SRC" ;; esac
+done
+cd -P "$(dirname "$SRC")"
+# auto-load this machine's config (gitignored) so the CLI and the VS Code extension agree
+PROFILE="${RELAY_PROFILE:-personal}"
+[ -f "data/captain.${PROFILE}.md" ] && { set -a; . "data/captain.${PROFILE}.md"; set +a; }
 PY=""
 for c in python3.13 python3.12 python3.11 python3.10 python3 python; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys;exit(0 if sys.version_info>=(3,10) else 1)' 2>/dev/null; then
