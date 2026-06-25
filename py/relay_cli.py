@@ -11,10 +11,13 @@ Subcommands:
 """
 from __future__ import annotations
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -115,6 +118,46 @@ def cmd_dispatch(argv: list[str]) -> int:
     return 1
 
 
+def _read_log(task: str) -> str:
+    p = ctrl.CFG.data_dir / task / "worker.log"
+    try:
+        return p.read_text(errors="ignore") if p.exists() else ""
+    except Exception:
+        return ""
+
+
+def _now_line(task: str) -> str:
+    """The worker's last meaningful action — the at-a-glance 'what's it doing' line."""
+    clean = _ANSI.sub("", _read_log(task))
+    lines = [l.strip() for l in clean.splitlines() if l.strip()]
+    for l in reversed(lines):                       # prefer a tool-call bullet
+        if l[:1] in ("●", "•", "⏺"):
+            return l[:90]
+    return lines[-1][:90] if lines else ""
+
+
+def _elapsed(task: str) -> str:
+    txt = ((ctrl.CFG.data_dir / task / "status.md").read_text(errors="ignore")
+           if (ctrl.CFG.data_dir / task / "status.md").exists() else "")
+    lines = [l for l in txt.splitlines() if l.strip()]
+    if not lines:
+        return ""
+    try:
+        start = datetime.fromisoformat(lines[0].split()[1])
+        secs = int((datetime.now(timezone.utc) - start).total_seconds())
+        return f"{secs // 60}m{secs % 60:02d}s"
+    except Exception:
+        return ""
+
+
+def _meta(task: str) -> dict:
+    mp = ctrl.CFG.data_dir / task / "meta.json"
+    try:
+        return json.loads(mp.read_text()) if mp.exists() else {}
+    except Exception:
+        return {}
+
+
 def _workers() -> list[dict]:
     """Live worker rows — the machine-readable feed any UI (VS Code ext, web) consumes."""
     dd = ctrl.CFG.data_dir
@@ -125,17 +168,54 @@ def _workers() -> list[dict]:
         if not (d / "active").exists():
             continue
         state, line = ctrl.stop_reason(d.name)
-        meta = {}
-        mp = d / "meta.json"
-        if mp.exists():
-            try:
-                meta = json.loads(mp.read_text())
-            except Exception:
-                pass
+        meta = _meta(d.name)
         rows.append({"task": d.name, "repo": meta.get("repo", ""), "issue": meta.get("item", ""),
                      "lane": meta.get("lane", ""), "tier": meta.get("tier", ""),
-                     "state": state.value, "line": line, "branch": meta.get("branch", "")})
+                     "state": state.value, "line": line, "branch": meta.get("branch", ""),
+                     "now": _now_line(d.name)})
     return rows
+
+
+def cmd_peek(argv: list[str]) -> int:
+    """Live worker transcript + facts (the click-to-watch feed). Keeps ANSI so xterm renders it."""
+    if not argv:
+        print("usage: relay peek <task> [--json]", file=sys.stderr); return 2
+    task = argv[0]
+    meta = _meta(task)
+    state, _line = ctrl.stop_reason(task)
+    wt = meta.get("worktree", "")
+    files = []
+    if wt and Path(wt).exists():
+        out = subprocess.run(["git", "-C", wt, "status", "--porcelain"],
+                             capture_output=True, text=True).stdout
+        files = [l[3:] for l in out.splitlines() if l.strip()][:60]
+    tail = _read_log(task)[-24000:]                 # last ~24k chars, ANSI intact
+    data = {"task": task, "lane": meta.get("lane", ""), "state": state.value,
+            "branch": meta.get("branch", ""), "elapsed": _elapsed(task),
+            "files": files, "now": _now_line(task), "log": tail}
+    if "--json" in argv:
+        print(json.dumps(data)); return 0
+    print(f"{task} · lane {data['lane']} · {data['state']} · {data['elapsed']} · "
+          f"{len(files)} files")
+    print(_ANSI.sub("", tail)[-6000:])
+    return 0
+
+
+def cmd_diff(argv: list[str]) -> int:
+    """What the worker has changed so far — the worktree's unified diff (committed + working)."""
+    if not argv:
+        print("usage: relay diff <task>", file=sys.stderr); return 2
+    wt = _meta(argv[0]).get("worktree", "")
+    if not wt or not Path(wt).exists():
+        print("(no worktree for this task)", file=sys.stderr); return 1
+    base = subprocess.run(["git", "-C", wt, "symbolic-ref", "--quiet", "--short",
+                           "refs/remotes/origin/HEAD"], capture_output=True, text=True).stdout.strip()
+    base = base.split("/")[-1] if base else "main"
+    committed = subprocess.run(["git", "-C", wt, "diff", f"origin/{base}...HEAD"],
+                               capture_output=True, text=True).stdout
+    working = subprocess.run(["git", "-C", wt, "diff"], capture_output=True, text=True).stdout
+    sys.stdout.write(committed + working)
+    return 0
 
 
 def cmd_status(argv: list[str]) -> int:
@@ -189,7 +269,8 @@ def cmd_resume(_argv: list[str]) -> int:
 
 
 COMMANDS = {"watch": cmd_watch, "pull": cmd_pull, "dispatch": cmd_dispatch,
-            "status": cmd_status, "board": cmd_board, "note": cmd_note, "lanes": cmd_lanes,
+            "status": cmd_status, "board": cmd_board, "peek": cmd_peek, "diff": cmd_diff,
+            "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}
 
 
