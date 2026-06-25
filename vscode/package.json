@@ -4,6 +4,8 @@
   "description": "Mission control for the Relay autonomous-agent orchestrator — watch the crew, dispatch, and intervene from inside VS Code. Local only; drives relay via a configurable exec prefix (local, or `ssh nas docker exec` / Remote-SSH).",
   "version": "0.1.0",
   "publisher": "manikantar",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/ManikantaR/relay.git" },
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other"],
   "activationEvents": ["onStartupFinished"],
