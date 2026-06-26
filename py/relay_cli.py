@@ -95,7 +95,23 @@ def cmd_board(argv: list[str]) -> int:
             review += getattr(b, "pull_review", lambda: [])()
         except Exception:
             pass
-    data = {"ready": ready, "active": _workers(), "review": review}
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    active = []
+    for s in st.list_sessions():
+        if s.get("state") in {"done", "terminated"}:
+            continue
+        active.append({
+            "session_id": s["session_id"],
+            "task": s.get("task_id", s["session_id"]),
+            "repo": s.get("repo", ""),
+            "lane": s.get("lane", ""),
+            "tier": s.get("tier", ""),
+            "state": s.get("state", ""),
+            "role": s.get("role", ""),
+            "now": f"{s.get('role', '')} · {s.get('model', '')}".strip(" ·"),
+        })
+    data = {"ready": ready, "active": active, "review": review}
     if "--json" in argv:
         print(json.dumps(data)); return 0
     print(f"ready:{len(ready)}  active:{len(data['active'])}  review:{len(review)}")

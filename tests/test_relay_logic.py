@@ -580,6 +580,35 @@ def test_cli_timeline_json(tmp_path, monkeypatch):
     rows = json.loads(buf.getvalue())
     assert any(e["type"] == "state_changed" for e in rows)
 
+def test_cli_board_uses_v2_sessions_for_active(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    (td / "active").touch()
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+    monkeypatch.setattr(cli, "get_board", lambda repo: type("B", (), {
+        "pull_ready": lambda self: [],
+        "pull_review": lambda self: [],
+    })())
+    monkeypatch.setattr(cli.ctrl, "projects", lambda: [("o/r", "/proj")])
+    monkeypatch.setattr(cli.lanes, "available_lanes", lambda refresh=False: ["claude"])
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_board(["--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert len(data["active"]) == 1
+    assert data["active"][0]["session_id"] == "task_smartocrprocess-12"
+
 def test_cli_transcript_and_evidence_json_for_bridged_session(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)

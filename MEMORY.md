@@ -16,6 +16,17 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Aligned the board/dashboard feed with the v2 session model. `relay board --json` now
+       emits active work from bridged v2 sessions instead of legacy worker rows, and the VS
+       Code dashboard now peeks by `session_id` and treats session states (`running`,
+       `paused`, `held`, `needs_decision`, etc.) as first-class UI states. Validation remains
+       green: 58 Python tests and extension compile pass.
+Next:  The runtime, daemon, CLI, and extension are now mostly on one session-centric model.
+       The next practical milestone is still the live local trial against smartocrprocess once
+       GitHub auth is repaired, because that is now the strongest missing evidence.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine.
+
+## 2026-06-26 · personal · agent
 Did:   Added more session-centric operator actions to the VS Code extension: timeline and
        evidence views are now first-class commands alongside diff and peek, so the extension
        exposes the new v2 session surfaces directly instead of forcing everything through the

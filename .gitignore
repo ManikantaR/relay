@@ -12,6 +12,10 @@ data/*/brief.md
 data/*/job.id
 data/*/evidence/
 data/.lanes.json
+data/sessions/
+data/queue/
+data/cache/
+data/relay.db
 .worktrees/
 # python
 __pycache__/
