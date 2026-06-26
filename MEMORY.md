@@ -16,6 +16,22 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Corrected the first-pass Mission Control layout bug after live feedback. The right rail
+       had been collapsing too early because the responsive breakpoint was too aggressive for a
+       real VS Code editor pane; this turned the dashboard into a long stacked page instead of a
+       desktop console. Tightened the shell to keep a two-column main+rail layout down to a
+       smaller width, reduced rail width, and pushed scroll pressure into bounded inner panels
+       (timeline, changed files, evidence, transcript) instead of the whole document. Rebuilt,
+       repackaged, and reinstalled the extension successfully; compile and 64 pytest tests stay
+       green.
+Next:  Reload VS Code and do the live Mission Control smoke check at the real editor width:
+       confirm the right rail stays docked, the page no longer becomes a long scroller, and
+       the selected-session panels scroll internally. Then continue with the broader backlog:
+       get a fresh dispatchable smartocrprocess issue or restore Claude credits for `#12`.
+Blocked: none in the extension build/install path; smartocrprocess live trial still depends on
+       repo/provider state (`#12` credit blocked, `#44` already in review, no fresh ready issue).
+
+## 2026-06-26 · personal · agent
 Did:   Consolidated the entire Relay v2 session sequence into one durable checkpoint. What was
        planned at the start of this run was: finish the session-centric Relay v2 runtime,
        bridge the older v1 task model into it, expose operator control/inspection through CLI
