@@ -99,6 +99,7 @@ class Store:
         sdir.mkdir(parents=True, exist_ok=False)
         self.evidence_dir(doc["session_id"]).mkdir(exist_ok=True)
         self.transcript_path(doc["session_id"]).touch()
+        (sdir / doc.get("brief_path", "brief.md")).touch()
         schema.write_json(self.session_path(doc["session_id"]), doc)
         self._upsert_session_row(doc)
         ev = schema.make_event(doc["session_id"], "session_created", "relay", "session created",

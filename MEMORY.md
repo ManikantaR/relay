@@ -16,6 +16,19 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added the first review-loop runtime slice for Relay v2. Implemented review helpers for
+       spawning branchless reviewer sessions, appending line-specific feedback back into the
+       same brief, tracking review rounds, forcing `needs_decision` on cap, and marking
+       parent sessions `approved` or `changes_requested`. The test pass exposed that the
+       state machine lagged the real review protocol, so the transition table was updated to
+       let reviewer sessions finish cleanly and let parent sessions move from
+       `review_requested` into review outcomes. Full suite is green: 44 passed.
+Next:  Wire review runtime into daemon/API orchestration flows: request-review endpoints,
+       review submission payloads, and parent/reviewer session coordination through the
+       session store rather than manual helper calls.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Hardened the initial v2 daemon/storage slice. Added SQLite rebuild-from-disk logic so
        the DB can be regenerated from canonical session/event artifacts, refactored daemon
        routing into a pure `handle_request()` path so the API contract is testable without

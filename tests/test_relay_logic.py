@@ -27,6 +27,7 @@ schema = _load("relay_schema")
 store = _load("relay_store")
 state = _load("relay_state")
 daemon = _load("relay_daemon")
+review = _load("relay_review")
 from relay_board import Ticket  # noqa: E402
 
 
@@ -306,3 +307,60 @@ def test_daemon_dispatch_pause_resume_nudge(tmp_path):
     status, timeline = daemon.handle_request("GET", f"/api/sessions/{sid}/timeline", {}, st)
     assert status == 200
     assert any(e["type"] == "operator_nudge" for e in timeline["events"])
+
+
+# ------------------------------------------------------- review loop engine
+def test_spawn_reviewer_session(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    st.create_session(sess)
+    st.transition_session(sess["session_id"], "running")
+    reviewer = review.spawn_reviewer(st, sess["session_id"])
+    assert reviewer["role"] == "reviewer"
+    parent = st.get_session(sess["session_id"])
+    assert parent["state"] == "review_requested"
+    assert parent["review_session_id"] == reviewer["session_id"]
+
+def test_review_changes_requested_appends_brief_and_changes_state(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    created = st.create_session(sess)
+    st.transition_session(created["session_id"], "running")
+    reviewer = review.spawn_reviewer(st, created["session_id"])
+    parent = review.submit_review(
+        st,
+        created["session_id"],
+        reviewer["session_id"],
+        comments=[{"path": "backend/main.py", "line": 12, "message": "handle missing token"}],
+        approved=False,
+    )
+    assert parent["state"] == "changes_requested"
+    assert parent["review_round"] == 1
+    brief = (st.session_dir(created["session_id"]) / created["brief_path"]).read_text()
+    assert "Review Feedback Round 1" in brief
+    assert "backend/main.py:12" in brief
+
+def test_review_approval_marks_parent_approved(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    created = st.create_session(sess)
+    st.transition_session(created["session_id"], "running")
+    reviewer = review.spawn_reviewer(st, created["session_id"])
+    parent = review.submit_review(st, created["session_id"], reviewer["session_id"], comments=[], approved=True)
+    assert parent["state"] == "approved"
+
+def test_review_cap_forces_needs_decision(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj", max_review_rounds=1)
+    created = st.create_session(sess)
+    st.transition_session(created["session_id"], "running")
+    reviewer = review.spawn_reviewer(st, created["session_id"])
+    parent = review.submit_review(
+        st,
+        created["session_id"],
+        reviewer["session_id"],
+        comments=[{"path": "a.py", "line": 1, "message": "fix this"}],
+        approved=False,
+    )
+    assert parent["state"] == "needs_decision"
+    assert any(e["type"] == "review_loop_capped" for e in st.timeline(created["session_id"]))
