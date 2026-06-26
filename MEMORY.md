@@ -16,6 +16,25 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Investigated Claude credit burn in the live Relay setup. Verified locally that the
+       generated worker brief is small (`data/smartocrprocess-12/brief.md` is 2.5 KB) and the
+       managed repo root instructions are modest (`smartocrprocess/AGENTS.md` is 4.5 KB), so
+       the recent Relay UI/session work is not the material cost driver. The real signal is in
+       the failed worker log: Claude returned `Usage credits required for 1M context ... use
+       --model to switch to standard context`. Local Claude Code v2.1.177 help confirms Relay
+       is currently launching `claude -p` without a pinned `--model`, `--effort`, or
+       `--max-budget-usd`, so the Claude lane is implicitly taking the expensive default path.
+       Official Claude Code docs also confirm Sonnet is the cost-effective default for most
+       coding tasks, effort level directly affects token burn, and context growth comes from
+       file reads / command output more than the initial task brief.
+Next:  Add lane-level Claude model policy to Relay before the next live retry: default the
+       Claude implementer worker to a standard-context model (likely `sonnet`) with `medium`
+       effort, reserve 1M-context / Opus only for explicit escalation, and consider a hard
+       worker budget plus narrower issue slicing for large Tier-2 features like smartocrprocess
+       `#12`.
+Blocked: none for the research itself; implementation is the next step.
+
+## 2026-06-26 · personal · agent
 Did:   Added and used a first board-recovery command: `relay session-reconcile`. It mutates
        GitHub issue labels from the trusted control plane based on session state so stale board
        labels stop lying. Applied it to the real smartocrprocess state: issue `#12` (blocked
