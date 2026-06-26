@@ -142,6 +142,32 @@ def evidence_ok(task: str) -> tuple[bool, list[str]]:
 
 # --- the trusted close-out: evidence -> push -> PR -> tier gate ---------------------------
 
+def _collect_evidence(task: str, worktree: str) -> None:
+    """Agents don't reliably write to the exact evidence path — sweep the worktree for
+    evidence-like files (summary*.md / pytest*.txt / test-output / *.png) and normalize them
+    into data/<task>/evidence/ so legitimate proof isn't lost to a naming/path slip."""
+    import shutil
+    ev = CFG.data_dir / task / "evidence"
+    (ev / "screenshots").mkdir(parents=True, exist_ok=True)
+    if not worktree or not Path(worktree).exists():
+        return
+    for root, dirs, files in os.walk(worktree):
+        if ".git" in root.split(os.sep):
+            continue
+        for f in files:
+            low, src = f.lower(), Path(root) / f
+            try:
+                if not (ev / "summary.md").exists() and "summary" in low and low.endswith(".md"):
+                    shutil.copy(src, ev / "summary.md")
+                elif not (ev / "pytest.txt").exists() and low.endswith((".txt", ".log")) \
+                        and ("pytest" in low or ("test" in low and "out" in low)):
+                    shutil.copy(src, ev / "pytest.txt")
+                elif low.endswith(".png"):
+                    shutil.copy(src, ev / "screenshots" / f)
+            except Exception:
+                pass
+
+
 def close_out(task: str) -> None:
     """Worker finished. Gate on evidence, then the TRUSTED plane pushes + files the PR.
     The worker never pushed; this is where the leash becomes structural."""
@@ -153,6 +179,7 @@ def close_out(task: str) -> None:
     repo = meta.get("repo", "")
     title = meta.get("title", "") or f"relay {task}"
 
+    _collect_evidence(task, worktree)           # rescue evidence the agent misplaced
     ok, have = evidence_ok(task)
     if not ok:
         with _status_path(task).open("a") as f:

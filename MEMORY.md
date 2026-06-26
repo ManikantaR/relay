@@ -15,6 +15,16 @@ Blocked: <anything waiting, or "none">
 
 ---
 
+## 2026-06-26 · personal · agent
+Did:     smartocrprocess-44 done -> PR 45 (tier-1, lane copilot)
+Next:    Owner: skim + merge.
+Blocked: none
+
+## 2026-06-25 · personal · agent
+Did:     smartocrprocess-42 done -> PR 43 (tier-1, lane copilot)
+Next:    Owner: skim + merge.
+Blocked: none
+
 ## 2026-06-25 · personal · agent
 Did:     smartocrprocess-40 done -> PR 41 (tier-1, lane copilot)
 Next:    Owner: skim + merge.
