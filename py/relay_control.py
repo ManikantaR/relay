@@ -172,6 +172,7 @@ def close_out(task: str) -> None:
     """Worker finished. Gate on evidence, then the TRUSTED plane pushes + files the PR.
     The worker never pushed; this is where the leash becomes structural."""
     from relay_board import get_board
+    import relay_bridge as bridge
     taskdir = CFG.data_dir / task
     meta = json.loads((taskdir / "meta.json").read_text()) if (taskdir / "meta.json").exists() else {}
     tier, item, branch = meta.get("tier", "1"), meta.get("item", ""), meta.get("branch", "")
@@ -186,6 +187,7 @@ def close_out(task: str) -> None:
             f.write(f"HELD {datetime.now(timezone.utc).isoformat()}\n")
         _notify_once("needs-decision", task,
                      f"held — no evidence bundle (have: {', '.join(have) or 'none'}). No PR filed.")
+        bridge.mark_needs_decision(task, "no evidence bundle", hold=True)
         memory_append(did=f"{task} finished but evidence gate FAILED — held, no PR",
                       nxt="Owner: add summary.md + pytest/screenshot, or re-dispatch.", author="agent")
         _clear_active(task)
@@ -195,6 +197,7 @@ def close_out(task: str) -> None:
     push = subprocess.run(["git", "-C", worktree, "push", "-u", "origin", branch],
                           capture_output=True, text=True)
     if push.returncode != 0:
+        bridge.mark_needs_decision(task, f"push failed: {push.stderr.strip()[:200]}")
         _notify_once("needs-decision", task, f"push failed: {push.stderr.strip()[:200]}")
         _clear_active(task)
         return
@@ -206,10 +209,12 @@ def close_out(task: str) -> None:
         pr = get_board(repo).file_pr(branch, f"{title} (#{item})", body, tier)
         get_board(repo).apply_label(item, "agent-review")
     except Exception as e:
+        bridge.mark_needs_decision(task, f"PR/label step failed: {e}")
         _notify_once("needs-decision", task, f"PR/label step failed: {e}")
         _clear_active(task)
         return
 
+    bridge.mark_review_pending(task, tier, str(pr))
     if tier == "2":
         notify("tier2-held", task, f"PR {pr} — read every line at a desk, no rush")
     else:
@@ -247,10 +252,13 @@ def _failover_lane(task: str) -> dict | None:
 # --- the watchdog: rate-limited (probe&resume) | hung (escalate) | done (close) ----------
 
 def supervise(task: str, probe, resume) -> None:
+    import relay_bridge as bridge
+    bridge.sync_task(task, reason="watchdog tick")
     state, line = stop_reason(task)
     if state in (State.DONE,):
         close_out(task); return
     if state is State.HELD:
+        bridge.mark_needs_decision(task, "held by v1 runtime", hold=True)
         _clear_active(task); return
     if state is State.RATE_LIMITED:
         # Failover FIRST: resume on the next available lane (AGENTS.md §12). Only when every
@@ -269,6 +277,7 @@ def supervise(task: str, probe, resume) -> None:
                 _notify_once("needs-decision", task, "probe hit a non-limit error"); return
             time.sleep(CFG.probe_interval)       # rc == 1: still limited
     if state is State.ERROR:
+        bridge.mark_needs_decision(task, line[len("ERROR"):].strip() or "worker errored")
         _notify_once("needs-decision", task, line[len("ERROR"):].strip() or "worker errored")
         _clear_active(task); return
     if state is State.PROGRESS:
@@ -388,6 +397,7 @@ def dispatch_ticket(ticket, project: str, repo: str = "",
                     lane_override: str | None = None) -> str | None:
     import relay_spawn as spawn
     import relay_lanes as lanes
+    import relay_bridge as bridge
     from relay_board import get_board
     task = task_id(repo, ticket.id)
 
@@ -414,6 +424,7 @@ def dispatch_ticket(ticket, project: str, repo: str = "",
     get_board(repo).apply_label(ticket.id, "agent-wip")     # control-plane mutates the board
     mode = spawn.spawn(task, project, ticket.id, ticket.tier, str(brief), lane, ticket.title,
                        requested=preferred, explicit=explicit, repo=repo)
+    bridge.sync_task(task, reason="dispatch")
     tag = "" if reason == "preferred" else f" [{reason}]"        # never silent: announce subs
     notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}")
     memory_append(did=f"Dispatched {task} ({ticket.title}) tier-{ticket.tier} lane={lane}{tag}",

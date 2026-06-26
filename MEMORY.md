@@ -16,6 +16,20 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added the first v1->v2 bridge. New `relay_bridge.py` now mirrors existing task
+       artifacts (`meta.json`, `status.md`, `active`, `brief.md`) into deterministic v2
+       sessions, syncs watchdog state into the session store, and marks review-pending or
+       needs-decision outcomes during close-out. Wired the bridge into dispatch, watchdog
+       supervision, and close-out paths. Learned that the bridge must snapshot the v1 brief
+       into the v2 session directory instead of pointing at `../task/brief.md`, otherwise the
+       store tries to create invalid relative paths inside the session tree. Full suite is
+       green: 49 passed.
+Next:  Decide how aggressively to route live CLI/status surfaces onto the v2 session store.
+       The next low-risk move is to expose bridged sessions via CLI/daemon status views before
+       replacing more of the v1 lifecycle.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Wired the review-loop runtime into the daemon/API contract. Added
        `/api/sessions/{id}/request-review` to spawn reviewer sessions and
        `/api/sessions/{id}/submit-review` to deliver approval or line-specific change requests

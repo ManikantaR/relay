@@ -3,6 +3,7 @@ and worker-exit classification. The safety-critical bits (evidence gate, exit cl
 get the most coverage. Run: cd relay && python3 -m pytest -q
 """
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -28,6 +29,7 @@ store = _load("relay_store")
 state = _load("relay_state")
 daemon = _load("relay_daemon")
 review = _load("relay_review")
+bridge = _load("relay_bridge")
 from relay_board import Ticket  # noqa: E402
 
 
@@ -416,3 +418,52 @@ def test_review_cap_forces_needs_decision(tmp_path):
     )
     assert parent["state"] == "needs_decision"
     assert any(e["type"] == "review_loop_capped" for e in st.timeline(created["session_id"]))
+
+
+# ------------------------------------------------------- v1 -> v2 bridge
+def test_bridge_sync_creates_session_from_v1_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r",
+        "project": "/proj",
+        "tier": "1",
+        "lane": "claude",
+        "worktree": "/proj/.worktrees/t12",
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    (td / "active").touch()
+    st = store.Store(tmp_path)
+    sess = bridge.sync_task("smartocrprocess-12", store=st)
+    assert sess["session_id"] == "task_smartocrprocess-12"
+    got = st.get_session(sess["session_id"])
+    assert got["state"] == "running"
+    assert got["repo"] == "o/r"
+
+def test_bridge_mark_review_pending(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    st = store.Store(tmp_path)
+    bridge.ensure_session_for_task("smartocrprocess-12", store=st)
+    sess = bridge.mark_review_pending("smartocrprocess-12", "1", "45", store=st)
+    assert sess["state"] == "review_requested"
+    assert any(e["type"] == "review_requested" for e in st.timeline(sess["session_id"]))
+
+def test_bridge_mark_needs_decision(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("ERROR exit=1 2026-06-26T00:00:00+00:00\n")
+    st = store.Store(tmp_path)
+    bridge.ensure_session_for_task("smartocrprocess-12", store=st)
+    sess = bridge.mark_needs_decision("smartocrprocess-12", "worker errored", store=st)
+    assert sess["state"] == "needs_decision"
