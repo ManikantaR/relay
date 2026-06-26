@@ -665,11 +665,14 @@ def test_cli_doctor_flags_invalid_github_auth(tmp_path, monkeypatch):
     (project / ".crew" / "project.md").write_text("area: x\n")
     (project / ".crew" / "tier2-paths.txt").write_text("storage.py\n")
     (project / ".crew" / "protected-tests.txt").write_text("tests/test_storage.py\n")
+    (tmp_path / "vscode" / "out").mkdir(parents=True)
+    (tmp_path / "vscode" / "package.json").write_text("{}\n")
+    (tmp_path / "vscode" / "out" / "extension.js").write_text("// bundle\n")
     cli = _load("relay_cli")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
     monkeypatch.setattr(cli.ctrl, "projects", lambda: [("o/r", str(project))])
-    monkeypatch.setattr(cli.shutil, "which", lambda tool: None if tool == "tmux" else f"/usr/bin/{tool}")
+    monkeypatch.setattr(cli.shutil, "which", lambda tool: None if tool in {"tmux", "vsce"} else f"/usr/bin/{tool}")
 
     class Result:
         def __init__(self, returncode, stdout="", stderr=""):
@@ -691,7 +694,80 @@ def test_cli_doctor_flags_invalid_github_auth(tmp_path, monkeypatch):
     data = json.loads(buf.getvalue())
     assert data["status"] == "fail"
     assert any(c["key"] == "github_auth" and c["status"] == "fail" for c in data["checks"])
+    assert any(c["key"] == "vscode_packaging" and c["status"] == "warn" for c in data["checks"])
     assert any("gh auth login -h github.com" in step for step in data["next_actions"])
+
+def test_cli_vscode_package_uses_local_vsce(tmp_path, monkeypatch):
+    cli = _load("relay_cli")
+    vscode = tmp_path / "vscode"
+    (vscode / "node_modules" / ".bin").mkdir(parents=True)
+    (vscode / "node_modules" / ".bin" / "vsce").write_text("")
+    (vscode / "package.json").write_text(json.dumps({"name": "relay-control", "version": "0.1.0"}))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda tool: "/usr/bin/npm" if tool == "npm" else None)
+
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, cwd=None, capture_output=True, text=True, timeout=60):
+        calls.append((cmd, cwd))
+        return Result(stdout="ok\n")
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_vscode_package(["--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["vsix"].endswith("vscode/relay-control-0.1.0.vsix")
+    assert calls[0][0] == ["npm", "run", "compile"]
+    assert calls[1][0][0].endswith("vscode/node_modules/.bin/vsce")
+    assert calls[1][0][1:4] == ["package", "--no-dependencies", "-o"]
+
+def test_cli_vscode_install_invokes_code_with_vsix(tmp_path, monkeypatch):
+    cli = _load("relay_cli")
+    vscode = tmp_path / "vscode"
+    vscode.mkdir()
+    (vscode / "relay-control-0.1.0.vsix").write_text("vsix")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda tool: "/opt/homebrew/bin/code" if tool == "code" else None)
+
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, cwd=None, capture_output=True, text=True, timeout=60):
+        calls.append((cmd, cwd))
+        return Result(stdout="installed\n")
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_vscode_install(["--vsix", str(vscode / "relay-control-0.1.0.vsix"), "--force", "--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["vsix"].endswith("relay-control-0.1.0.vsix")
+    assert calls[0][0] == [
+        "/opt/homebrew/bin/code",
+        "--install-extension",
+        str(vscode / "relay-control-0.1.0.vsix"),
+        "--force",
+    ]
 
 def test_cli_transcript_and_evidence_json_for_bridged_session(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

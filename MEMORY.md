@@ -16,6 +16,47 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Cleared the packaged VS Code install path end to end. Installed `@vscode/vsce` as a
+       local dev dependency in `vscode/`, fixed two real path bugs in `relay vscode-package`
+       (local `vsce` path and VSIX output path under `cwd=vscode`), revalidated the suite
+       (`62 passed`), and then exercised the actual operator flow: `./relay vscode-package`
+       now produces `/Users/manikantaradhakrishna/repo/relay/vscode/relay-control-0.1.0.vsix`
+       and `./relay vscode-install --force` successfully installs it into VS Code. Doctor now
+       reports packaging as healthy; the installed extension is visible as
+       `manikantar.relay-control@0.1.0`.
+Next:  The remaining real blocker before the smartocrprocess live issue trial is GitHub CLI
+       auth. After `gh auth login -h github.com`, run a real dispatch/review flow against the
+       local smartocrprocess repo and exercise it through the installed extension.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine.
+
+## 2026-06-26 · personal · agent
+Did:   Tightened `relay doctor` so VS Code install readiness is explicit. It now reports a
+       separate `vscode_packaging` check, which reflects the real machine state: extension
+       source and compiled bundle are present, but local VSIX packaging is not deterministic
+       because `vsce` is not installed locally and the `npx` fallback stalls in this
+       environment. Re-validated after the change: 62 pytest tests pass, compileall passes,
+       and doctor against local smartocrprocess now cleanly reports the two remaining launch
+       gates: invalid `gh` auth and missing local `vsce`.
+Next:  Repair `gh auth`, install local `vsce`, then do two tests in order: package/install
+       the extension through Relay and run the real smartocrprocess GitHub-issue dispatch
+       trial through the updated CLI/extension surfaces.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine; packaged VS Code install remains blocked by missing local `vsce`.
+
+## 2026-06-26 · personal · agent
+Did:   Added first-class VS Code packaging/install commands to Relay itself:
+       `relay vscode-package` and `relay vscode-install`. They compile the extension,
+       package a VSIX via local `vsce`/global `vsce`/`npx @vscode/vsce`, and install it via
+       the VS Code CLI. Added focused tests for the command wiring and documented the flow in
+       [vscode/README.md](/Users/manikantaradhakrishna/repo/relay/vscode/README.md:1). A live
+       probe on this machine showed the important operator behavior: without a local `vsce`,
+       packaging now fails fast with a clear timeout instead of hanging while `npx` tries to
+       fetch tooling.
+Next:  Two concrete launch blockers remain before the full smartocrprocess trial from inside
+       VS Code: repair `gh auth` for GitHub issue pickup, and install `vsce` locally (or add
+       it to the extension workspace) so `relay vscode-package/install` can produce a VSIX.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine; VS Code install packaging is additionally blocked by missing local `vsce`.
+
+## 2026-06-26 · personal · agent
 Did:   Added a new `relay doctor` readiness audit so the local launch/trial path is explicit
        instead of inferred. It checks board repo config, managed project path, required
        `.crew` policy files, GitHub CLI auth health, local toolchain (`tmux`, `git`,

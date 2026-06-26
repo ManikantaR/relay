@@ -153,6 +153,117 @@ def _doctor_status(checks: list[dict]) -> str:
     return "pass"
 
 
+def _vscode_dir() -> Path:
+    return Path("vscode")
+
+
+def _vscode_manifest() -> dict:
+    return json.loads((_vscode_dir() / "package.json").read_text(encoding="utf-8"))
+
+
+def _vsce_cmd() -> list[str] | None:
+    local = _vscode_dir() / "node_modules" / ".bin" / "vsce"
+    if local.exists():
+        return [str(local.resolve())]
+    found = shutil.which("vsce")
+    if found:
+        return [found]
+    if shutil.which("npx"):
+        return ["npx", "@vscode/vsce"]
+    return None
+
+
+def _has_local_vsce() -> bool:
+    return (_vscode_dir() / "node_modules" / ".bin" / "vsce").exists() or bool(shutil.which("vsce"))
+
+
+def _run_checked(cmd: list[str], *, cwd: Path | None = None, timeout: int = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def cmd_vscode_package(argv: list[str]) -> int:
+    vscode_dir = _vscode_dir()
+    if not (vscode_dir / "package.json").exists():
+        print("vscode/package.json not found", file=sys.stderr)
+        return 1
+    if not shutil.which("npm"):
+        print("npm not found in PATH", file=sys.stderr)
+        return 1
+    manifest = _vscode_manifest()
+    default_name = f"{manifest['name']}-{manifest['version']}.vsix"
+    out_path = Path(_opt(argv, "--out", str((vscode_dir / default_name).resolve()))).expanduser()
+    try:
+        compile_run = _run_checked(["npm", "run", "compile"], cwd=vscode_dir)
+    except subprocess.TimeoutExpired:
+        print("timed out while compiling the VS Code extension", file=sys.stderr)
+        return 1
+    if compile_run.returncode != 0:
+        print(compile_run.stderr or compile_run.stdout, file=sys.stderr)
+        return 1
+    vsce = _vsce_cmd()
+    if not vsce:
+        print("vsce is not available; install it locally or use npx", file=sys.stderr)
+        return 1
+    try:
+        package_run = _run_checked(
+            vsce + ["package", "--no-dependencies", "-o", str(out_path)],
+            cwd=vscode_dir,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        print("timed out while packaging the VS Code extension; install `vsce` locally to avoid npx fetch stalls", file=sys.stderr)
+        return 1
+    if package_run.returncode != 0:
+        print(package_run.stderr or package_run.stdout, file=sys.stderr)
+        return 1
+    if "--json" in argv:
+        print(json.dumps({"vsix": str(out_path), "stdout": package_run.stdout.strip()}))
+        return 0
+    print(str(out_path))
+    return 0
+
+
+def cmd_vscode_install(argv: list[str]) -> int:
+    code_bin = shutil.which("code")
+    if not code_bin:
+        print("code not found in PATH", file=sys.stderr)
+        return 1
+    vsix = _opt(argv, "--vsix")
+    if vsix:
+        vsix_path = Path(vsix).expanduser()
+        if not vsix_path.exists():
+            print(f"VSIX not found: {vsix_path}", file=sys.stderr)
+            return 1
+    else:
+        manifest = _vscode_manifest()
+        vsix_path = (_vscode_dir() / f"{manifest['name']}-{manifest['version']}.vsix").resolve()
+        rc = cmd_vscode_package(["--out", str(vsix_path)])
+        if rc != 0:
+            return rc
+    cmd = [code_bin, "--install-extension", str(vsix_path)]
+    if "--force" in argv:
+        cmd.append("--force")
+    try:
+        install_run = _run_checked(cmd, timeout=20)
+    except subprocess.TimeoutExpired:
+        print("timed out while installing the VSIX through `code`", file=sys.stderr)
+        return 1
+    if install_run.returncode != 0:
+        print(install_run.stderr or install_run.stdout, file=sys.stderr)
+        return 1
+    if "--json" in argv:
+        print(json.dumps({"vsix": str(vsix_path), "stdout": install_run.stdout.strip()}))
+        return 0
+    print(f"installed {vsix_path}")
+    return 0
+
+
 def cmd_doctor(argv: list[str]) -> int:
     reg = ctrl.projects()
     repo = _opt(argv, "--repo", reg[0][0] if reg else os.getenv("GITHUB_REPO", ""))
@@ -235,6 +346,19 @@ def cmd_doctor(argv: list[str]) -> int:
     else:
         checks.append(_doctor_check("vscode_bundle", "warn", "extension bundle missing; run `npm run compile` in vscode/"))
         next_actions.append("Compile the VS Code extension before installing or launching it.")
+    if _has_local_vsce():
+        checks.append(_doctor_check("vscode_packaging", "pass", "local VSIX packaging tool is available"))
+    elif shutil.which("npx"):
+        checks.append(_doctor_check(
+            "vscode_packaging",
+            "warn",
+            "local VSIX packaging tool is missing; package flow may stall on npx fetch",
+            detail="install vsce locally to make `relay vscode-package` deterministic",
+        ))
+        next_actions.append("Install `vsce` locally in vscode/ or globally before trying `relay vscode-package/install`.")
+    else:
+        checks.append(_doctor_check("vscode_packaging", "fail", "no VSIX packaging tool is available"))
+        next_actions.append("Install `vsce` locally in vscode/ or globally before trying `relay vscode-package/install`.")
 
     checks.append(_doctor_check(
         "session_store",
@@ -612,6 +736,7 @@ def cmd_resume(_argv: list[str]) -> int:
 
 COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
             "doctor": cmd_doctor,
+            "vscode-package": cmd_vscode_package, "vscode-install": cmd_vscode_install,
             "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,
             "transcript": cmd_transcript, "evidence": cmd_evidence, "session-diff": cmd_session_diff,
             "session-terminate": cmd_session_terminate, "session-checkpoint": cmd_session_checkpoint,

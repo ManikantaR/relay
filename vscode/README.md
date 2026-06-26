@@ -31,6 +31,17 @@ npm run compile
 # press F5 in VS Code to launch an Extension Development Host
 ```
 
+## Package / install
+From the relay repo root:
+```bash
+./relay vscode-package              # builds + writes vscode/relay-control-<version>.vsix
+./relay vscode-install --force      # builds (if needed) + installs through `code`
+```
+
+`relay vscode-package` looks for a local `vscode/node_modules/.bin/vsce` first, then a
+global `vsce`, then `npx @vscode/vsce`. That keeps packaging explicit and local instead of
+depending on a manually remembered command line.
+
 Requires `relay` reachable per `relay.execPrefix`, and (for `--json` status) the relay control
 plane running. Consumes relay's machine-readable feed: `relay status|pull|lanes --json`.
 
