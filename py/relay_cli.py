@@ -190,19 +190,13 @@ def cmd_peek(argv: list[str]) -> int:
                              capture_output=True, text=True).stdout
         files = [l[3:] for l in out.splitlines() if l.strip()][:60]
     tail = _read_log(task)[-24000:]                 # last ~24k chars, ANSI intact
-    if len(tail.strip()) < 20:
-        # Buffered worker (e.g. `claude -p` piped) writes nothing until exit. Fall back to a
-        # live signal: the tmux pane if it has real content, else the worktree changes so far.
-        pane = subprocess.run(["tmux", "capture-pane", "-t", f"relay:{task}", "-p", "-S", "-200"],
-                              capture_output=True, text=True).stdout
-        body = "\n".join(l for l in pane.splitlines()
-                         if l.strip() and "tee" not in l and "relay_finish" not in l
-                         and "command not found" not in l and not l.endswith("% "))
-        if len(body.strip()) > 20:
-            tail = pane
-        elif files:
-            tail = ("\x1b[33m(output is buffered — this lane streams only at the end; "
-                    "showing live file changes)\x1b[0m\r\n\r\n  " + "\r\n  ".join(files))
+    if len(tail.strip()) < 20 and files:
+        # Buffered worker (e.g. `claude -p` piped) writes nothing until exit; the streamed
+        # log is the real fix. Until it flushes, show the live worktree changes so the peek
+        # still reflects what the agent is doing right now.
+        tail = ("\x1b[33m⟳ output is buffered — this run streams only when it finishes.\x1b[0m\r\n"
+                "\x1b[2mLive file changes in the worktree:\x1b[0m\r\n\r\n  "
+                + "\r\n  ".join(files))
     data = {"task": task, "lane": meta.get("lane", ""), "state": state.value,
             "branch": meta.get("branch", ""), "elapsed": _elapsed(task),
             "files": files, "now": _now_line(task), "log": tail}
