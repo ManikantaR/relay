@@ -70,6 +70,7 @@ class Store:
                 create index if not exists idx_events_session_seq on events(session_id, sequence);
                 """
             )
+        self.rebuild_index()
 
     def session_dir(self, session_id: str) -> Path:
         return self.sessions_dir / session_id
@@ -206,3 +207,36 @@ class Store:
                     doc["updated_at"],
                 ),
             )
+
+    def rebuild_index(self) -> None:
+        """Rebuild SQLite from canonical disk artifacts.
+
+        This keeps JSON-on-disk as the source of truth and lets the DB be replaced or repaired
+        without losing session history.
+        """
+        with self._connect() as conn:
+            conn.execute("delete from events")
+            conn.execute("delete from sessions")
+        for p in sorted(self.sessions_dir.glob("*/session.json")):
+            doc = schema.read_json(p)
+            errs = schema.validate_session(doc)
+            if errs:
+                continue
+            self._upsert_session_row(doc)
+            for event in schema.read_jsonl(self.events_path(doc["session_id"])):
+                errs = schema.validate_event(event)
+                if errs:
+                    continue
+                with self._connect() as conn:
+                    conn.execute(
+                        """
+                        insert or replace into events
+                        (event_id, session_id, sequence, type, actor, timestamp, summary, payload_json)
+                        values (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event["event_id"], doc["session_id"], event["sequence"], event["type"],
+                            event["actor"], event["timestamp"], event["summary"],
+                            json.dumps(event["payload"], sort_keys=True),
+                        ),
+                    )

@@ -26,6 +26,7 @@ lanes = _load("relay_lanes")
 schema = _load("relay_schema")
 store = _load("relay_store")
 state = _load("relay_state")
+daemon = _load("relay_daemon")
 from relay_board import Ticket  # noqa: E402
 
 
@@ -253,3 +254,55 @@ def test_store_pause_and_nudge(tmp_path):
     assert got["state"] == "paused"
     types = [e["type"] for e in st.timeline(sess["session_id"])]
     assert "operator_nudge" in types
+
+def test_store_rebuild_index_from_disk(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    st.create_session(sess)
+    st.transition_session(sess["session_id"], "running")
+    st.transition_session(sess["session_id"], "paused")
+    st2 = store.Store(tmp_path)
+    rows = st2.list_sessions()
+    assert len(rows) == 1
+    assert rows[0]["state"] == "paused"
+    assert len(st2.timeline(sess["session_id"])) >= 3
+
+
+# ------------------------------------------------------- daemon API contract
+def test_daemon_health_endpoint(tmp_path):
+    st = store.Store(tmp_path)
+    status, body = daemon.handle_request("GET", "/api/health", {}, st)
+    assert status == 200
+    assert body["status"] == "ok"
+
+def test_daemon_dispatch_pause_resume_nudge(tmp_path):
+    st = store.Store(tmp_path)
+    status, created = daemon.handle_request("POST", "/api/dispatch", {
+        "task_id": "repo-12",
+        "repo": "o/r",
+        "project_path": "/proj",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "selection_reason": "test dispatch"
+    }, st)
+    assert status == 201
+    sid = created["session_id"]
+
+    status, body = daemon.handle_request("POST", f"/api/sessions/{sid}/resume", {}, st)
+    assert status == 200
+    assert body["state"] == "running"
+
+    status, body = daemon.handle_request("POST", f"/api/sessions/{sid}/pause", {}, st)
+    assert status == 200
+    assert body["state"] == "paused"
+
+    status, _body = daemon.handle_request("POST", f"/api/sessions/{sid}/nudge", {
+        "actor": "owner",
+        "nudge_type": "goal_correction",
+        "message": "refocus"
+    }, st)
+    assert status == 200
+
+    status, timeline = daemon.handle_request("GET", f"/api/sessions/{sid}/timeline", {}, st)
+    assert status == 200
+    assert any(e["type"] == "operator_nudge" for e in timeline["events"])

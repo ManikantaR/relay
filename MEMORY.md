@@ -16,6 +16,19 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Hardened the initial v2 daemon/storage slice. Added SQLite rebuild-from-disk logic so
+       the DB can be regenerated from canonical session/event artifacts, refactored daemon
+       routing into a pure `handle_request()` path so the API contract is testable without
+       socket permissions, and added tests for session rebuild plus daemon dispatch/pause/
+       resume/nudge flows. Learned that this sandbox blocks ephemeral localhost binds in
+       pytest, so the request contract now lives behind a pure handler function instead of
+       being coupled to socket setup. Full suite is green: 40 passed.
+Next:  Start the review-loop engine on top of the new session store: reviewer session
+       lifecycle, same-brief feedback append, capped review rounds, and first escalation
+       hooks. After that, wire the daemon endpoints deeper into real orchestration flows.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Added the first Relay v2 runtime slice. Wrote [RELAY_V2.md] as the architecture
        contract, then implemented v2 session/event schema helpers, SQLite-backed indexing,
        a canonical state-transition module, schema artifacts under `schemas/`, and an

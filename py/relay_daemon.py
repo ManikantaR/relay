@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -46,74 +47,14 @@ class RelayHandler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8"))
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
-        if path == "/api/health":
-            return _json(self, HTTPStatus.OK, {"status": "ok"})
-        if path == "/api/sessions":
-            return _json(self, HTTPStatus.OK, {"sessions": self.store.list_sessions()})
-        if path.startswith("/api/sessions/"):
-            parts = [p for p in path.split("/") if p]
-            if len(parts) == 3:
-                session_id = parts[2]
-                try:
-                    return _json(self, HTTPStatus.OK, self.store.get_session(session_id))
-                except FileNotFoundError:
-                    return _json(self, HTTPStatus.NOT_FOUND, {"error": "session not found"})
-            if len(parts) == 4 and parts[3] == "timeline":
-                session_id = parts[2]
-                try:
-                    return _json(self, HTTPStatus.OK, {"events": self.store.timeline(session_id)})
-                except FileNotFoundError:
-                    return _json(self, HTTPStatus.NOT_FOUND, {"error": "session not found"})
-        return _json(self, HTTPStatus.NOT_FOUND, {"error": "not found"})
+        code, payload = handle_request("GET", urlparse(self.path).path, {}, self.store)
+        return _json(self, code, payload)
 
     def do_POST(self) -> None:
-        path = urlparse(self.path).path
         try:
             body = self._body()
-            if path == "/api/dispatch":
-                doc = schema.default_session(
-                    task_id=body["task_id"],
-                    repo=body.get("repo", ""),
-                    project_path=body.get("project_path", "."),
-                    role=body.get("role", "implementer"),
-                    tier=str(body.get("tier", "1")),
-                    lane=body.get("lane", ""),
-                    provider=body.get("provider", ""),
-                    model=body.get("model", ""),
-                    effort=body.get("effort", "medium"),
-                    selection_mode=body.get("selection_mode", "auto"),
-                    selection_reason=body.get("selection_reason", "manual dispatch"),
-                    alternatives=body.get("alternatives", []),
-                    max_review_rounds=int(body.get("max_review_rounds", 3)),
-                )
-                created = self.store.create_session(doc)
-                return _json(self, HTTPStatus.CREATED, created)
-
-            if path.startswith("/api/sessions/"):
-                parts = [p for p in path.split("/") if p]
-                if len(parts) == 4:
-                    session_id, action = parts[2], parts[3]
-                    if action == "pause":
-                        session = self.store.transition_session(
-                            session_id, "paused", actor="owner", reason=body.get("reason", "manual pause")
-                        )
-                        return _json(self, HTTPStatus.OK, session)
-                    if action == "resume":
-                        session = self.store.transition_session(
-                            session_id, "running", actor="owner", reason=body.get("reason", "manual resume")
-                        )
-                        return _json(self, HTTPStatus.OK, session)
-                    if action == "nudge":
-                        session = self.store.add_nudge(
-                            session_id=session_id,
-                            actor=body.get("actor", "owner"),
-                            nudge_type=body.get("nudge_type", "goal_correction"),
-                            message=body["message"],
-                            attachments=body.get("attachments", []),
-                        )
-                        return _json(self, HTTPStatus.OK, session)
-            return _json(self, HTTPStatus.NOT_FOUND, {"error": "not found"})
+            code, payload = handle_request("POST", urlparse(self.path).path, body, self.store)
+            return _json(self, code, payload)
         except FileNotFoundError:
             return _json(self, HTTPStatus.NOT_FOUND, {"error": "session not found"})
         except KeyError as e:
@@ -122,15 +63,90 @@ class RelayHandler(BaseHTTPRequestHandler):
             return _json(self, HTTPStatus.BAD_REQUEST, {"error": str(e)})
 
 
+def handle_request(method: str, path: str, body: dict, store: Store) -> tuple[int, dict]:
+    if method == "GET":
+        if path == "/api/health":
+            return HTTPStatus.OK, {"status": "ok"}
+        if path == "/api/sessions":
+            return HTTPStatus.OK, {"sessions": store.list_sessions()}
+        if path.startswith("/api/sessions/"):
+            parts = [p for p in path.split("/") if p]
+            if len(parts) == 3:
+                session_id = parts[2]
+                return HTTPStatus.OK, store.get_session(session_id)
+            if len(parts) == 4 and parts[3] == "timeline":
+                session_id = parts[2]
+                return HTTPStatus.OK, {"events": store.timeline(session_id)}
+        return HTTPStatus.NOT_FOUND, {"error": "not found"}
+
+    if method == "POST":
+        if path == "/api/dispatch":
+            doc = schema.default_session(
+                task_id=body["task_id"],
+                repo=body.get("repo", ""),
+                project_path=body.get("project_path", "."),
+                role=body.get("role", "implementer"),
+                tier=str(body.get("tier", "1")),
+                lane=body.get("lane", ""),
+                provider=body.get("provider", ""),
+                model=body.get("model", ""),
+                effort=body.get("effort", "medium"),
+                selection_mode=body.get("selection_mode", "auto"),
+                selection_reason=body.get("selection_reason", "manual dispatch"),
+                alternatives=body.get("alternatives", []),
+                max_review_rounds=int(body.get("max_review_rounds", 3)),
+            )
+            created = store.create_session(doc)
+            return HTTPStatus.CREATED, created
+
+        if path.startswith("/api/sessions/"):
+            parts = [p for p in path.split("/") if p]
+            if len(parts) == 4:
+                session_id, action = parts[2], parts[3]
+                if action == "pause":
+                    session = store.transition_session(
+                        session_id, "paused", actor="owner", reason=body.get("reason", "manual pause")
+                    )
+                    return HTTPStatus.OK, session
+                if action == "resume":
+                    session = store.transition_session(
+                        session_id, "running", actor="owner", reason=body.get("reason", "manual resume")
+                    )
+                    return HTTPStatus.OK, session
+                if action == "nudge":
+                    session = store.add_nudge(
+                        session_id=session_id,
+                        actor=body.get("actor", "owner"),
+                        nudge_type=body.get("nudge_type", "goal_correction"),
+                        message=body["message"],
+                        attachments=body.get("attachments", []),
+                    )
+                    return HTTPStatus.OK, session
+
+    return HTTPStatus.NOT_FOUND, {"error": "not found"}
+
+
 def serve() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     host = os.getenv("RELAYD_HOST", "127.0.0.1")
     port = int(os.getenv("RELAYD_PORT", "8787"))
-    store = Store()
-    server = ThreadingHTTPServer((host, port), RelayHandler)
-    server.store = store  # type: ignore[attr-defined]
+    server = build_server(host, port)
     log.info("relayd listening on http://%s:%s", host, port)
     server.serve_forever()
+
+
+def build_server(host: str = "127.0.0.1", port: int = 8787, store: Store | None = None) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), RelayHandler)
+    server.store = store or Store()  # type: ignore[attr-defined]
+    return server
+
+
+def start_server_in_thread(host: str = "127.0.0.1", port: int = 0,
+                           store: Store | None = None) -> tuple[ThreadingHTTPServer, threading.Thread]:
+    server = build_server(host, port, store=store)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    return server, t
 
 
 if __name__ == "__main__":
