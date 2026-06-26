@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Relay Session",
+  "type": "object",
+  "required": [
+    "session_id",
+    "task_id",
+    "repo",
+    "project_path",
+    "role",
+    "tier",
+    "state",
+    "lane",
+    "provider",
+    "model",
+    "effort",
+    "selection_mode",
+    "selection_reason",
+    "alternatives",
+    "operator_overrides",
+    "review_round",
+    "max_review_rounds",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "session_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "repo": { "type": "string" },
+    "project_path": { "type": "string" },
+    "role": { "enum": ["implementer", "reviewer", "triage"] },
+    "tier": { "enum": ["1", "2"] },
+    "state": {
+      "enum": [
+        "queued", "dispatching", "running", "paused", "awaiting_input",
+        "rate_limited", "review_requested", "review_running", "changes_requested",
+        "approved", "held", "needs_decision", "done", "error", "terminated"
+      ]
+    },
+    "lane": { "type": "string" },
+    "provider": { "type": "string" },
+    "model": { "type": "string" },
+    "effort": { "type": "string" },
+    "selection_mode": { "type": "string" },
+    "selection_reason": { "type": "string" },
+    "alternatives": { "type": "array" },
+    "operator_overrides": { "type": "array" },
+    "review_round": { "type": "integer", "minimum": 0 },
+    "max_review_rounds": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" }
+  }
+}

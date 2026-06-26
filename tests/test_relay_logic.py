@@ -23,6 +23,9 @@ spawn = _load("relay_spawn")
 ctrl = _load("relay_control")
 finish = _load("relay_finish")
 lanes = _load("relay_lanes")
+schema = _load("relay_schema")
+store = _load("relay_store")
+state = _load("relay_state")
 from relay_board import Ticket  # noqa: E402
 
 
@@ -212,3 +215,41 @@ def test_get_board_uses_passed_repo(monkeypatch):
     import relay_board
     monkeypatch.setenv("RELAY_PROFILE", "personal")
     assert relay_board.get_board("owner/repo").repo == "owner/repo"
+
+
+# ------------------------------------------------------- v2 session schema + state/store
+def test_default_session_validates():
+    sess = schema.default_session("repo-12", "o/r", "/tmp/proj")
+    assert schema.validate_session(sess) == []
+    assert sess["state"] == "queued"
+
+def test_event_validates():
+    ev = schema.make_event("sess_x", "session_created", "relay", "created", sequence=1)
+    assert schema.validate_event(ev) == []
+
+def test_state_machine_allows_running_to_paused():
+    assert state.can_transition("running", "paused") is True
+    assert state.transition("running", "paused").to == "paused"
+
+def test_state_machine_rejects_done_to_running():
+    with pytest.raises(ValueError):
+        state.transition("done", "running")
+
+def test_store_creates_session_and_indexes_it(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    st.create_session(sess)
+    got = st.get_session(sess["session_id"])
+    assert got["task_id"] == "repo-12"
+    assert st.timeline(sess["session_id"])[0]["type"] == "session_created"
+
+def test_store_pause_and_nudge(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    st.create_session(sess)
+    st.transition_session(sess["session_id"], "running")
+    st.add_nudge(sess["session_id"], "owner", "goal_correction", "focus on AC2")
+    got = st.get_session(sess["session_id"])
+    assert got["state"] == "paused"
+    types = [e["type"] for e in st.timeline(sess["session_id"])]
+    assert "operator_nudge" in types

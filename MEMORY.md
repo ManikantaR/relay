@@ -16,6 +16,18 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added the first Relay v2 runtime slice. Wrote [RELAY_V2.md] as the architecture
+       contract, then implemented v2 session/event schema helpers, SQLite-backed indexing,
+       a canonical state-transition module, schema artifacts under `schemas/`, and an
+       initial `relayd` REST scaffold (`/api/health`, `/api/sessions`, dispatch, pause,
+       resume, nudge). Restored local testability by creating a repo-local `.venv` and
+       installing `pytest`; suite is now green again (37 passed). Also ignored `.venv/`.
+Next:  Exercise and harden daemon/API behavior next: add HTTP-level tests, rebuild SQLite
+       state from disk artifacts, then start wiring the review-loop engine onto the new
+       session store instead of growing more UI first.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:     smartocrprocess-44 done -> PR 45 (tier-1, lane copilot)
 Next:    Owner: skim + merge.
 Blocked: none

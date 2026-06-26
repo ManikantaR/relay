@@ -17,6 +17,7 @@ data/.lanes.json
 __pycache__/
 *.pyc
 .mypy_cache/
+.venv/
 # vscode extension build
 vscode/node_modules/
 vscode/out/

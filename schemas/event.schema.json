@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Relay Event",
+  "type": "object",
+  "required": [
+    "event_id",
+    "session_id",
+    "type",
+    "timestamp",
+    "actor",
+    "summary",
+    "payload",
+    "sequence"
+  ],
+  "properties": {
+    "event_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "type": {
+      "enum": [
+        "session_created", "session_started", "session_paused", "session_resumed",
+        "session_terminated", "state_changed", "checkpoint_written", "operator_nudge",
+        "operator_raw_input", "worker_acknowledged", "review_requested",
+        "review_comment_added", "review_approved", "review_changes_requested",
+        "review_loop_capped", "model_selected", "model_escalated", "lane_switched",
+        "rate_limited", "needs_decision", "evidence_written", "cost_updated"
+      ]
+    },
+    "timestamp": { "type": "string" },
+    "actor": { "type": "string" },
+    "summary": { "type": "string" },
+    "payload": { "type": "object" },
+    "sequence": { "type": "integer", "minimum": 1 }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Relay Models Policy",
+  "type": "object",
+  "properties": {
+    "models": {
+      "type": "object",
+      "properties": {
+        "defaults": { "type": "object" },
+        "tier2": { "type": "object" },
+        "escalation": { "type": "object" }
+      },
+      "required": ["defaults"]
+    }
+  },
+  "required": ["models"]
+}

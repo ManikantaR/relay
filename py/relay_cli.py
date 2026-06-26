@@ -25,10 +25,16 @@ import relay_control as ctrl
 import relay_spawn as spawn
 import relay_lanes as lanes
 from relay_board import get_board
+import relay_daemon
 
 
 def cmd_watch(_argv: list[str]) -> int:
     ctrl.run_loop(spawn.probe, spawn.resume)
+    return 0
+
+
+def cmd_daemon(_argv: list[str]) -> int:
+    relay_daemon.serve()
     return 0
 
 
@@ -275,7 +281,7 @@ def cmd_resume(_argv: list[str]) -> int:
     return 0
 
 
-COMMANDS = {"watch": cmd_watch, "pull": cmd_pull, "dispatch": cmd_dispatch,
+COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
             "status": cmd_status, "board": cmd_board, "peek": cmd_peek, "diff": cmd_diff,
             "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}
