@@ -16,6 +16,19 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Extended the v2 session-centric inspection path with transcript, evidence, and diff
+       reads. Added CLI commands `relay transcript`, `relay evidence`, and
+       `relay session-diff`, plus matching daemon endpoints under `/api/sessions/{id}/...`.
+       The implementation routes through shared bridge helpers so pure v2 sessions and bridged
+       v1 tasks resolve logs/evidence/worktree diffs the same way. Full suite is green:
+       54 passed.
+Next:  The next meaningful decision is whether to surface these v2 session reads inside the
+       existing VS Code extension or keep building daemon/web endpoints first. Runtime-wise,
+       the clean next step is to expose more session actions through the daemon before touching
+       UI rendering.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Added read-only CLI inspection for the v2 session store: `relay sessions`,
        `relay session <id>`, and `relay timeline <id>`. These commands are bridge-aware:
        they first sync any current v1 task artifacts into the v2 store, then render session

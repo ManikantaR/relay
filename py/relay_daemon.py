@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import relay_schema as schema
 import relay_review as review
+import relay_bridge as bridge
 from relay_store import Store
 
 log = logging.getLogger("relayd")
@@ -78,6 +79,15 @@ def handle_request(method: str, path: str, body: dict, store: Store) -> tuple[in
             if len(parts) == 4 and parts[3] == "timeline":
                 session_id = parts[2]
                 return HTTPStatus.OK, {"events": store.timeline(session_id)}
+            if len(parts) == 4 and parts[3] == "transcript":
+                session_id = parts[2]
+                return HTTPStatus.OK, {"session_id": session_id, "transcript": bridge.transcript_text(session_id, store=store)}
+            if len(parts) == 4 and parts[3] == "evidence":
+                session_id = parts[2]
+                return HTTPStatus.OK, bridge.evidence_summary(session_id, store=store)
+            if len(parts) == 4 and parts[3] == "diff":
+                session_id = parts[2]
+                return HTTPStatus.OK, {"session_id": session_id, "diff": bridge.session_diff_text(session_id, store=store)}
         return HTTPStatus.NOT_FOUND, {"error": "not found"}
 
     if method == "POST":

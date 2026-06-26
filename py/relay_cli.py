@@ -163,6 +163,54 @@ def cmd_timeline(argv: list[str]) -> int:
     return 0
 
 
+def cmd_transcript(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay transcript <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+        text = relay_bridge.transcript_text(sid, store=st)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps({"session_id": sid, "transcript": text})); return 0
+    sys.stdout.write(text)
+    return 0
+
+
+def cmd_evidence(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay evidence <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+        data = relay_bridge.evidence_summary(sid, store=st)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps(data)); return 0
+    print(json.dumps(data, indent=2))
+    return 0
+
+
+def cmd_session_diff(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay session-diff <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+        diff = relay_bridge.session_diff_text(sid, store=st)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps({"session_id": sid, "diff": diff})); return 0
+    sys.stdout.write(diff)
+    return 0
+
+
 def _opt(argv: list[str], flag: str, default=None):
     return argv[argv.index(flag) + 1] if flag in argv else default
 
@@ -354,6 +402,7 @@ def cmd_resume(_argv: list[str]) -> int:
 
 COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
             "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,
+            "transcript": cmd_transcript, "evidence": cmd_evidence, "session-diff": cmd_session_diff,
             "status": cmd_status, "board": cmd_board, "peek": cmd_peek, "diff": cmd_diff,
             "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -146,3 +147,57 @@ def mark_needs_decision(task: str, detail: str, hold: bool = False, store: Store
         def force(doc: dict[str, Any]) -> None:
             doc["state"] = target
         return store.update_session(sess["session_id"], force)
+
+
+def _task_from_session(session: dict[str, Any]) -> str | None:
+    sid = session.get("session_id", "")
+    if isinstance(sid, str) and sid.startswith("task_"):
+        return sid[len("task_"):]
+    return None
+
+
+def transcript_text(session_id: str, store: Store | None = None) -> str:
+    store = store or Store()
+    sess = store.get_session(session_id)
+    task = _task_from_session(sess)
+    if task:
+        p = _data_dir() / task / "worker.log"
+    else:
+        p = store.transcript_path(session_id)
+    return p.read_text(errors="ignore") if p.exists() else ""
+
+
+def evidence_summary(session_id: str, store: Store | None = None) -> dict[str, Any]:
+    store = store or Store()
+    sess = store.get_session(session_id)
+    task = _task_from_session(sess)
+    if task:
+        base = _data_dir() / task / "evidence"
+    else:
+        base = store.evidence_dir(session_id)
+    shots = sorted(str(p.name) for p in (base / "screenshots").glob("*.png")) if (base / "screenshots").exists() else []
+    return {
+        "base_dir": str(base),
+        "summary_exists": (base / "summary.md").exists(),
+        "pytest_exists": (base / "pytest.txt").exists(),
+        "screenshots": shots,
+        "summary_text": (base / "summary.md").read_text(encoding="utf-8") if (base / "summary.md").exists() else "",
+        "pytest_text": (base / "pytest.txt").read_text(encoding="utf-8") if (base / "pytest.txt").exists() else "",
+    }
+
+
+def session_diff_text(session_id: str, store: Store | None = None) -> str:
+    store = store or Store()
+    sess = store.get_session(session_id)
+    wt = sess.get("worktree_path", "")
+    if not wt or not Path(wt).exists():
+        return ""
+    base = subprocess.run(
+        ["git", "-C", wt, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        capture_output=True, text=True
+    ).stdout.strip()
+    base = base.split("/")[-1] if base else "main"
+    committed = subprocess.run(["git", "-C", wt, "diff", f"origin/{base}...HEAD"],
+                               capture_output=True, text=True).stdout
+    working = subprocess.run(["git", "-C", wt, "diff"], capture_output=True, text=True).stdout
+    return committed + working

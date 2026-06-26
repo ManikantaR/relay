@@ -531,3 +531,53 @@ def test_cli_timeline_json(tmp_path, monkeypatch):
         sys.stdout = old
     rows = json.loads(buf.getvalue())
     assert any(e["type"] == "state_changed" for e in rows)
+
+def test_cli_transcript_and_evidence_json_for_bridged_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    td = tmp_path / "smartocrprocess-12"
+    (td / "evidence" / "screenshots").mkdir(parents=True)
+    td.mkdir(exist_ok=True)
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    (td / "worker.log").write_text("worker output\n")
+    (td / "evidence" / "summary.md").write_text("did stuff\n")
+    (td / "evidence" / "pytest.txt").write_text("5 passed\n")
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_transcript(["task_smartocrprocess-12", "--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert "worker output" in data["transcript"]
+
+    buf = io.StringIO()
+    old = sys.stdout
+    try:
+        sys.stdout = buf
+        assert cli.cmd_evidence(["task_smartocrprocess-12", "--json"]) == 0
+    finally:
+        sys.stdout = old
+    evidence = json.loads(buf.getvalue())
+    assert evidence["summary_exists"] is True
+    assert evidence["pytest_exists"] is True
+
+def test_daemon_transcript_and_evidence_endpoints(tmp_path):
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    created = st.create_session(sess)
+    (st.transcript_path(created["session_id"])).write_text("hello transcript\n")
+    (st.evidence_dir(created["session_id"]) / "summary.md").write_text("summary\n")
+    status, body = daemon.handle_request("GET", f"/api/sessions/{created['session_id']}/transcript", {}, st)
+    assert status == 200
+    assert "hello transcript" in body["transcript"]
+    status, body = daemon.handle_request("GET", f"/api/sessions/{created['session_id']}/evidence", {}, st)
+    assert status == 200
+    assert body["summary_exists"] is True
