@@ -42,7 +42,9 @@ def _harness_cmd(lane: str, brief: Path, mode: str) -> str:
     if mode in ("wt-tab", "bg-job"):           # Windows work profile: claude only
         return f'claude --permission-mode acceptEdits -p (Get-Content -Raw "{brief}")'
     if lane == "claude":
-        return f'claude -p "$(cat {brief})" --permission-mode acceptEdits'
+        # script -qec gives claude a PTY so it STREAMS its output to the log (so the live
+        # peek isn't blank); without it `claude -p` buffers until exit.
+        return f"script -qec 'claude -p \"$(cat {brief})\" --permission-mode acceptEdits' /dev/null"
     if lane == "agy":                          # script -qec: keep agy output under a non-TTY
         return f"script -qec 'agy -p \"$(cat {brief})\"' /dev/null"
     if lane == "copilot":
