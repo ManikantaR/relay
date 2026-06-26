@@ -609,6 +609,90 @@ def test_cli_board_uses_v2_sessions_for_active(tmp_path, monkeypatch):
     assert len(data["active"]) == 1
     assert data["active"][0]["session_id"] == "task_smartocrprocess-12"
 
+def test_cli_doctor_reports_ready_project_and_sessions(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    project = tmp_path / "smartocrprocess"
+    (project / ".crew").mkdir(parents=True)
+    (project / ".git").mkdir()
+    (project / ".crew" / "project.md").write_text("area: x\n")
+    (project / ".crew" / "tier2-paths.txt").write_text("storage.py\n")
+    (project / ".crew" / "protected-tests.txt").write_text("tests/test_storage.py\n")
+    (tmp_path / "vscode" / "out").mkdir(parents=True)
+    (tmp_path / "vscode" / "package.json").write_text("{}\n")
+    (tmp_path / "vscode" / "out" / "extension.js").write_text("// bundle\n")
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": str(project), "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    (td / "active").touch()
+    cli = _load("relay_cli")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.ctrl, "projects", lambda: [("o/r", str(project))])
+    monkeypatch.setattr(cli.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    class Result:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=10):
+        assert cmd == ["gh", "auth", "status", "-h", "github.com"]
+        return Result(0, stdout="Logged in to github.com\n")
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_doctor(["--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["status"] == "pass"
+    assert data["sessions_active"] == 1
+    assert any(c["key"] == "github_auth" and c["status"] == "pass" for c in data["checks"])
+
+def test_cli_doctor_flags_invalid_github_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    project = tmp_path / "smartocrprocess"
+    (project / ".crew").mkdir(parents=True)
+    (project / ".crew" / "project.md").write_text("area: x\n")
+    (project / ".crew" / "tier2-paths.txt").write_text("storage.py\n")
+    (project / ".crew" / "protected-tests.txt").write_text("tests/test_storage.py\n")
+    cli = _load("relay_cli")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.ctrl, "projects", lambda: [("o/r", str(project))])
+    monkeypatch.setattr(cli.shutil, "which", lambda tool: None if tool == "tmux" else f"/usr/bin/{tool}")
+
+    class Result:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=10):
+        return Result(1, stderr="The token in default is invalid.\n")
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_doctor(["--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["status"] == "fail"
+    assert any(c["key"] == "github_auth" and c["status"] == "fail" for c in data["checks"])
+    assert any("gh auth login -h github.com" in step for step in data["next_actions"])
+
 def test_cli_transcript_and_evidence_json_for_bridged_session(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)

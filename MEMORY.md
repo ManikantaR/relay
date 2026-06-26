@@ -16,6 +16,21 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added a new `relay doctor` readiness audit so the local launch/trial path is explicit
+       instead of inferred. It checks board repo config, managed project path, required
+       `.crew` policy files, GitHub CLI auth health, local toolchain (`tmux`, `git`,
+       `python3`, `node`, `npm`, `code`), VS Code extension source/bundle presence, and the
+       indexed session store. Added tests for both a clean-ready case and the real broken-auth
+       case. Validation is green: 60 pytest tests, `python3 -m compileall`, `npm run compile`,
+       and `npm pack --dry-run` using a repo-local npm cache all pass. Running `relay doctor`
+       against local `smartocrprocess` confirms the launch surface is otherwise ready; the
+       only hard failure is still invalid `gh` auth on github.com.
+Next:  Repair `gh auth` on this machine, then run the real smartocrprocess GitHub-issue
+       dispatch/review trial and install the VS Code extension into a live VS Code session so
+       the operator loop can be exercised end-to-end.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine.
+
+## 2026-06-26 · personal · agent
 Did:   Aligned the board/dashboard feed with the v2 session model. `relay board --json` now
        emits active work from bridged v2 sessions instead of legacy worker rows, and the VS
        Code dashboard now peeks by `session_id` and treats session states (`running`,

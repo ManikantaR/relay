@@ -11,7 +11,9 @@ Subcommands:
 """
 from __future__ import annotations
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -127,6 +129,146 @@ def cmd_lanes(argv: list[str]) -> int:
     print(f"configured (RELAY_LANES): {', '.join(data['configured'])}")
     print(f"available (auth-checked): {', '.join(data['available']) or '(none)'}")
     print(f"strict (work governance): {data['strict']}")
+    return 0
+
+
+def _doctor_run(cmd: list[str]) -> tuple[bool, str]:
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except Exception as exc:
+        return False, str(exc)
+    text = (out.stdout or out.stderr or "").strip()
+    return out.returncode == 0, text
+
+
+def _doctor_check(key: str, status: str, summary: str, *, detail: str = "") -> dict:
+    return {"key": key, "status": status, "summary": summary, "detail": detail}
+
+
+def _doctor_status(checks: list[dict]) -> str:
+    if any(c["status"] == "fail" for c in checks):
+        return "fail"
+    if any(c["status"] == "warn" for c in checks):
+        return "warn"
+    return "pass"
+
+
+def cmd_doctor(argv: list[str]) -> int:
+    reg = ctrl.projects()
+    repo = _opt(argv, "--repo", reg[0][0] if reg else os.getenv("GITHUB_REPO", ""))
+    project = _opt(argv, "--project", reg[0][1] if reg else (ctrl.CFG.project or "."))
+    project_path = Path(project).expanduser()
+    vscode_dir = Path("vscode")
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sessions = st.list_sessions()
+    active_sessions = [s for s in sessions if s.get("state") not in {"done", "terminated"}]
+
+    checks: list[dict] = []
+    next_actions: list[str] = []
+
+    if repo:
+        checks.append(_doctor_check("board_repo", "pass", f"board repo configured: {repo}"))
+    else:
+        checks.append(_doctor_check("board_repo", "fail", "GITHUB_REPO/RELAY_PROJECTS not configured"))
+        next_actions.append("Set GITHUB_REPO or RELAY_PROJECTS before running a live issue trial.")
+
+    if project_path.exists():
+        checks.append(_doctor_check("project_path", "pass", f"project path exists: {project_path}"))
+    else:
+        checks.append(_doctor_check("project_path", "fail", f"project path missing: {project_path}"))
+        next_actions.append("Point RELAY_PROJECT or --project at the local managed repo.")
+
+    crew_files = (
+        project_path / ".crew" / "project.md",
+        project_path / ".crew" / "tier2-paths.txt",
+        project_path / ".crew" / "protected-tests.txt",
+    )
+    missing_crew = [str(p.relative_to(project_path)) for p in crew_files if not p.exists()]
+    if not project_path.exists():
+        pass
+    elif missing_crew:
+        checks.append(_doctor_check(
+            "crew_policy",
+            "fail",
+            "project leash is incomplete",
+            detail=", ".join(missing_crew),
+        ))
+        next_actions.append("Create the missing .crew policy files before dispatching work.")
+    else:
+        checks.append(_doctor_check("crew_policy", "pass", "project .crew policy files are present"))
+
+    if project_path.exists() and (project_path / ".git").exists():
+        checks.append(_doctor_check("project_git", "pass", f"git repo detected at {project_path}"))
+    elif project_path.exists():
+        checks.append(_doctor_check("project_git", "warn", f"no .git directory at {project_path}"))
+        next_actions.append("Use a real git checkout for the trial project so worktrees and diffs behave correctly.")
+
+    gh_ok, gh_text = _doctor_run(["gh", "auth", "status", "-h", "github.com"])
+    if gh_ok:
+        checks.append(_doctor_check("github_auth", "pass", "gh auth is healthy for github.com"))
+    else:
+        checks.append(_doctor_check("github_auth", "fail", "gh auth is not ready for github.com", detail=gh_text))
+        next_actions.append("Run `gh auth login -h github.com` to repair GitHub board access.")
+
+    for tool in ("tmux", "git", "python3", "node", "npm", "code"):
+        path = shutil.which(tool)
+        if path:
+            checks.append(_doctor_check(f"tool_{tool}", "pass", f"{tool} available", detail=path))
+        else:
+            status = "warn" if tool in {"tmux", "code"} else "fail"
+            checks.append(_doctor_check(f"tool_{tool}", status, f"{tool} not found in PATH"))
+            if tool == "tmux":
+                next_actions.append("Decide whether this environment should use tmux workers or the Windows-terminal/native process path.")
+            elif tool == "code":
+                next_actions.append("Install the VS Code CLI (`code`) if you want one-command extension install/open flows.")
+            else:
+                next_actions.append(f"Install `{tool}` before relying on that local workflow.")
+
+    if vscode_dir.exists() and (vscode_dir / "package.json").exists():
+        checks.append(_doctor_check("vscode_source", "pass", "VS Code extension source is present"))
+    else:
+        checks.append(_doctor_check("vscode_source", "fail", "VS Code extension source is missing"))
+    bundle = vscode_dir / "out" / "extension.js"
+    if bundle.exists():
+        checks.append(_doctor_check("vscode_bundle", "pass", "extension has a compiled bundle", detail=str(bundle)))
+    else:
+        checks.append(_doctor_check("vscode_bundle", "warn", "extension bundle missing; run `npm run compile` in vscode/"))
+        next_actions.append("Compile the VS Code extension before installing or launching it.")
+
+    checks.append(_doctor_check(
+        "session_store",
+        "pass",
+        f"{len(sessions)} session(s) indexed, {len(active_sessions)} active",
+        detail=str(ctrl.CFG.data_dir / "sessions"),
+    ))
+
+    data = {
+        "status": _doctor_status(checks),
+        "repo": repo,
+        "project_path": str(project_path),
+        "data_dir": str(ctrl.CFG.data_dir),
+        "sessions_total": len(sessions),
+        "sessions_active": len(active_sessions),
+        "checks": checks,
+        "next_actions": next_actions,
+    }
+    if "--json" in argv:
+        print(json.dumps(data))
+        return 0
+    print(f"relay doctor: {data['status']}")
+    print(f"repo: {repo or '(unset)'}")
+    print(f"project: {project_path}")
+    print(f"data: {ctrl.CFG.data_dir}")
+    print(f"sessions: {len(sessions)} total, {len(active_sessions)} active")
+    for check in checks:
+        marker = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}[check["status"]]
+        detail = f" [{check['detail']}]" if check["detail"] else ""
+        print(f"{marker:4} {check['key']}: {check['summary']}{detail}")
+    if next_actions:
+        print("next:")
+        for action in next_actions:
+            print(f"- {action}")
     return 0
 
 
@@ -469,6 +611,7 @@ def cmd_resume(_argv: list[str]) -> int:
 
 
 COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
+            "doctor": cmd_doctor,
             "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,
             "transcript": cmd_transcript, "evidence": cmd_evidence, "session-diff": cmd_session_diff,
             "session-terminate": cmd_session_terminate, "session-checkpoint": cmd_session_checkpoint,
