@@ -16,6 +16,17 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added more session-centric operator actions to the VS Code extension: timeline and
+       evidence views are now first-class commands alongside diff and peek, so the extension
+       exposes the new v2 session surfaces directly instead of forcing everything through the
+       old worker log mental model. Validation remains green: `npm run compile` passes and the
+       Python suite is still at 57 passing tests.
+Next:  The runtime and extension are in a good pre-trial state. The remaining practical gate
+       for the real smartocrprocess issue trial is still GitHub auth. After that is repaired,
+       run a real local dispatch and inspect it through the updated session-aware extension.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine.
+
+## 2026-06-26 · personal · agent
 Did:   Added real session-action wrappers to the CLI (`session-terminate`,
        `session-checkpoint`, `session-refresh`) and wired the VS Code extension to use them
        for session-centric control actions. The extension now has concrete checkpoint/refresh/

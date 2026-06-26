@@ -102,6 +102,28 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.window.showTextDocument(doc, { preview: true });
   });
 
+  reg('relay.viewTimeline', async (arg: any) => {
+    const s = sessionOf(arg);
+    if (!s) { return; }
+    let timeline = '';
+    try { timeline = await runRelay(`timeline ${s}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); return; }
+    const doc = await vscode.workspace.openTextDocument({
+      content: timeline.trim() || '(no timeline events)', language: 'plaintext',
+    });
+    vscode.window.showTextDocument(doc, { preview: true });
+  });
+
+  reg('relay.viewEvidence', async (arg: any) => {
+    const s = sessionOf(arg);
+    if (!s) { return; }
+    let evidence = '';
+    try { evidence = await runRelay(`evidence ${s}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); return; }
+    const doc = await vscode.workspace.openTextDocument({
+      content: evidence.trim() || '(no evidence)', language: 'json',
+    });
+    vscode.window.showTextDocument(doc, { preview: true });
+  });
+
   let paused = false;
   reg('relay.togglePause', async () => {
     try {

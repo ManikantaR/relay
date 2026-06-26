@@ -101,6 +101,16 @@
         "command": "relay.viewDiff",
         "title": "Relay: View Diff",
         "icon": "$(git-compare)"
+      },
+      {
+        "command": "relay.viewTimeline",
+        "title": "Relay: View Timeline",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "relay.viewEvidence",
+        "title": "Relay: View Evidence",
+        "icon": "$(files)"
       }
     ],
     "menus": {
@@ -148,6 +158,11 @@
           "group": "inline@3"
         },
         {
+          "command": "relay.viewDiff",
+          "when": "view == relayWorkers",
+          "group": "inline@3.5"
+        },
+        {
           "command": "relay.requestCheckpoint",
           "when": "view == relayWorkers",
           "group": "inline@4"
@@ -161,6 +176,16 @@
           "command": "relay.terminateSession",
           "when": "view == relayWorkers",
           "group": "inline@6"
+        },
+        {
+          "command": "relay.viewTimeline",
+          "when": "view == relayWorkers",
+          "group": "navigation@1"
+        },
+        {
+          "command": "relay.viewEvidence",
+          "when": "view == relayWorkers",
+          "group": "navigation@2"
         }
       ]
     },
