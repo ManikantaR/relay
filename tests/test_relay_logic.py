@@ -629,3 +629,17 @@ def test_daemon_transcript_and_evidence_endpoints(tmp_path):
     status, body = daemon.handle_request("GET", f"/api/sessions/{created['session_id']}/evidence", {}, st)
     assert status == 200
     assert body["summary_exists"] is True
+
+def test_cli_session_action_commands(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    created = st.create_session(sess)
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+
+    assert cli.cmd_session_checkpoint([created["session_id"], "--summary", "save point"]) == 0
+    assert any(e["type"] == "checkpoint_written" for e in st.timeline(created["session_id"]))
+    assert cli.cmd_session_terminate([created["session_id"]]) == 0
+    assert st.get_session(created["session_id"])["state"] == "terminated"

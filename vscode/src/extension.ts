@@ -128,6 +128,36 @@ export function activate(ctx: vscode.ExtensionContext): void {
     t.show();
   });
 
+  reg('relay.requestCheckpoint', async (w: Worker) => {
+    const sessionId = w?.session_id;
+    if (!sessionId) { return; }
+    try {
+      await runRelay(`session-checkpoint ${sessionId}`);
+      vscode.window.showInformationMessage(`Checkpoint requested for ${sessionId}.`);
+    } catch (e: any) { vscode.window.showErrorMessage(e.message); }
+  });
+
+  reg('relay.refreshSession', async (w: Worker) => {
+    const sessionId = w?.session_id;
+    if (!sessionId) { return; }
+    try {
+      await runRelay(`session-refresh ${sessionId}`);
+      vscode.window.showInformationMessage(`Refreshed ${sessionId}.`);
+    } catch (e: any) { vscode.window.showErrorMessage(e.message); }
+    refresh(); refreshBoard();
+  });
+
+  reg('relay.terminateSession', async (w: Worker) => {
+    const sessionId = w?.session_id;
+    if (!sessionId) { return; }
+    const ok = await vscode.window.showWarningMessage(`Terminate session ${sessionId}?`, { modal: true }, 'Terminate');
+    if (ok !== 'Terminate') { return; }
+    try {
+      await runRelay(`session-terminate ${sessionId}`);
+    } catch (e: any) { vscode.window.showErrorMessage(e.message); }
+    refresh(); refreshBoard();
+  });
+
   refresh().catch(() => {});
   const sec = Math.max(2, vscode.workspace.getConfiguration('relay').get<number>('pollSeconds', 5));
   const fast = setInterval(() => refresh().catch(() => {}), sec * 1000);

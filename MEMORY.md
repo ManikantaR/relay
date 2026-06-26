@@ -16,6 +16,18 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added real session-action wrappers to the CLI (`session-terminate`,
+       `session-checkpoint`, `session-refresh`) and wired the VS Code extension to use them
+       for session-centric control actions. The extension now has concrete checkpoint/refresh/
+       terminate commands instead of placeholder behavior, and it compiles cleanly against the
+       v2 session model. Full validation is green: 57 pytest tests and `npm run compile`.
+Next:  The runtime and extension are now far enough along that the main remaining practical
+       blocker is the live GitHub issue trial. Once `gh auth login` is repaired, run a local
+       smartocrprocess dispatch/review flow through the updated extension or CLI and observe
+       how the bridged sessions behave end-to-end.
+Blocked: live GitHub-backed issue pull/dispatch trial is still blocked by invalid `gh` auth on this machine.
+
+## 2026-06-26 · personal · agent
 Did:   Made the VS Code extension session-aware. The Relay sidebar now reads from the v2
        `sessions` surface instead of the old active-worker-only feed, and the detail panel now
        pulls session facts plus transcript/evidence-backed content from the new session-centric

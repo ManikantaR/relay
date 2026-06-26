@@ -211,6 +211,58 @@ def cmd_session_diff(argv: list[str]) -> int:
     return 0
 
 
+def cmd_session_terminate(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay session-terminate <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+      doc = st.transition_session(sid, "terminated", actor="owner", reason="manual terminate")
+    except FileNotFoundError:
+      print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps(doc)); return 0
+    print(f"terminated {sid}")
+    return 0
+
+
+def cmd_session_checkpoint(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay session-checkpoint <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    summary = _opt(argv, "--summary", "checkpoint requested")
+    try:
+        st.add_event(sid, "checkpoint_written", "owner", summary, {"requested": True})
+        doc = st.get_session(sid)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps(doc)); return 0
+    print(f"checkpoint requested for {sid}")
+    return 0
+
+
+def cmd_session_refresh(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay session-refresh <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    sid = argv[0]
+    try:
+        if sid.startswith("task_"):
+            doc = relay_bridge.sync_task(sid[len("task_"):], reason="manual refresh", store=st)
+        else:
+            doc = st.get_session(sid)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps(doc)); return 0
+    print(f"refreshed {sid}")
+    return 0
+
+
 def _opt(argv: list[str], flag: str, default=None):
     return argv[argv.index(flag) + 1] if flag in argv else default
 
@@ -403,6 +455,8 @@ def cmd_resume(_argv: list[str]) -> int:
 COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
             "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,
             "transcript": cmd_transcript, "evidence": cmd_evidence, "session-diff": cmd_session_diff,
+            "session-terminate": cmd_session_terminate, "session-checkpoint": cmd_session_checkpoint,
+            "session-refresh": cmd_session_refresh,
             "status": cmd_status, "board": cmd_board, "peek": cmd_peek, "diff": cmd_diff,
             "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}

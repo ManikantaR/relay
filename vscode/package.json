@@ -63,6 +63,21 @@
         "icon": "$(trash)"
       },
       {
+        "command": "relay.requestCheckpoint",
+        "title": "Relay: Request Checkpoint",
+        "icon": "$(debug-step-over)"
+      },
+      {
+        "command": "relay.refreshSession",
+        "title": "Relay: Refresh Session",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "relay.terminateSession",
+        "title": "Relay: Terminate Session",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "relay.attachTerminal",
         "title": "Relay: Attach Terminal",
         "icon": "$(terminal)"
@@ -131,6 +146,21 @@
           "command": "relay.killWorker",
           "when": "view == relayWorkers",
           "group": "inline@3"
+        },
+        {
+          "command": "relay.requestCheckpoint",
+          "when": "view == relayWorkers",
+          "group": "inline@4"
+        },
+        {
+          "command": "relay.refreshSession",
+          "when": "view == relayWorkers",
+          "group": "inline@5"
+        },
+        {
+          "command": "relay.terminateSession",
+          "when": "view == relayWorkers",
+          "group": "inline@6"
         }
       ]
     },
