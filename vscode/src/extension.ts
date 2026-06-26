@@ -5,7 +5,11 @@ import { Dashboard, Board } from './dashboard';
 import { PeekPanel } from './peekPanel';
 
 function taskOf(arg: any): string | undefined {
-  return typeof arg === 'string' ? arg : arg?.task;
+  return typeof arg === 'string' ? arg : arg?.task || arg?.task_id;
+}
+
+function sessionOf(arg: any): string | undefined {
+  return typeof arg === 'string' ? arg : arg?.session_id;
 }
 
 export function activate(ctx: vscode.ExtensionContext): void {
@@ -19,7 +23,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   // Fast, file-cheap: the tree + status bar (relay status reads disk).
   const refresh = async (): Promise<void> => {
     const ws = await provider.load();
-    const held = ws.filter(w => w.state === 'HELD').length;
+    const held = ws.filter(w => w.state === 'held').length;
     status.text = `$(rocket) relay: ${ws.length} active${held ? ` · ${held} held` : ''}`;
     status.tooltip = 'Relay mission control';
     status.show();
@@ -73,10 +77,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
   });
 
   reg('relay.killWorker', async (w: Worker) => {
-    if (!w?.task) { return; }
-    const ok = await vscode.window.showWarningMessage(`Kill worker ${w.task}?`, { modal: true }, 'Kill');
+    const taskId = w?.task_id;
+    if (!taskId) { return; }
+    const ok = await vscode.window.showWarningMessage(`Kill worker ${taskId}?`, { modal: true }, 'Kill');
     if (ok !== 'Kill') { return; }
-    try { await runRelay(`kill ${w.task}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); }
+    try { await runRelay(`kill ${taskId}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); }
     refresh(); refreshBoard();
   });
 
@@ -84,13 +89,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (w?.repo) { vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${w.repo}/pulls`)); }
   });
 
-  reg('relay.peek', (arg: any) => { const t = taskOf(arg); if (t) { PeekPanel.show(ctx, t); } });
+  reg('relay.peek', (arg: any) => { const s = sessionOf(arg); if (s) { PeekPanel.show(ctx, s); } });
 
   reg('relay.viewDiff', async (arg: any) => {
-    const t = taskOf(arg);
-    if (!t) { return; }
+    const s = sessionOf(arg);
+    if (!s) { return; }
     let patch = '';
-    try { patch = await runRelay(`diff ${t}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); return; }
+    try { patch = await runRelay(`session-diff ${s}`); } catch (e: any) { vscode.window.showErrorMessage(e.message); return; }
     const doc = await vscode.workspace.openTextDocument({
       content: patch.trim() || '(no changes yet)', language: 'diff',
     });
@@ -109,11 +114,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
   reg('relay.refreshBoard', refreshBoard);
 
   reg('relay.attachTerminal', (w: Worker) => {
-    if (!w?.task) { return; }
-    const t = vscode.window.createTerminal(`relay ${w.task}`);
+    const sessionId = w?.session_id;
+    const taskId = w?.task_id || '';
+    if (!sessionId) { return; }
+    const t = vscode.window.createTerminal(`relay ${taskId || sessionId}`);
     const pfx = execPrefix();
     // attach to the worker's tmux window (local, or through the exec prefix for the NAS)
-    t.sendText(`${pfx} tmux attach -t relay \\; select-window -t ${w.task}`.trim());
+    if (taskId) {
+      t.sendText(`${pfx} tmux attach -t relay \\; select-window -t ${taskId}`.trim());
+    } else {
+      t.sendText(`${pfx} tmux attach -t relay`.trim());
+    }
     t.show();
   });
 

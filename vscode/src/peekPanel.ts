@@ -1,12 +1,11 @@
 import * as vscode from 'vscode';
 import { runRelayJson } from './relay';
 
-// Click-to-watch: a per-worker panel that renders the live worker.log faithfully with
-// xterm.js (the agent's real colored output), polling `relay peek <task> --json`. Header
-// shows lane/state/elapsed/files; buttons jump to the diff or attach a real terminal.
+// Click-to-watch: a per-session panel that renders the session transcript and facts from the
+// v2 runtime, polling `relay session|transcript|evidence`.
 interface Peek {
-  task: string; lane: string; state: string; branch: string;
-  elapsed: string; files: string[]; now: string; log: string;
+  session_id: string; task_id: string; lane: string; state: string; role: string;
+  repo: string; model: string; effort: string; review_round?: number;
 }
 
 function makeNonce(): string {
@@ -19,21 +18,21 @@ export class PeekPanel {
   private static panels = new Map<string, PeekPanel>();
   private timer?: ReturnType<typeof setInterval>;
 
-  static show(ctx: vscode.ExtensionContext, task: string): void {
-    const existing = PeekPanel.panels.get(task);
+  static show(ctx: vscode.ExtensionContext, sessionId: string): void {
+    const existing = PeekPanel.panels.get(sessionId);
     if (existing) { existing.panel.reveal(); return; }
     const panel = vscode.window.createWebviewPanel(
-      'relayPeek', `Peek · ${task}`, vscode.ViewColumn.Active,
+      'relayPeek', `Peek · ${sessionId}`, vscode.ViewColumn.Active,
       {
         enableScripts: true, retainContextWhenHidden: false,
         localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
       });
-    new PeekPanel(ctx, panel, task);
+    new PeekPanel(ctx, panel, sessionId);
   }
 
   constructor(private ctx: vscode.ExtensionContext, private panel: vscode.WebviewPanel,
-              private task: string) {
-    PeekPanel.panels.set(task, this);
+              private sessionId: string) {
+    PeekPanel.panels.set(sessionId, this);
     panel.webview.html = this.html(panel.webview);
     panel.webview.onDidReceiveMessage((m) => {
       if (m && m.type === 'command') { vscode.commands.executeCommand(`relay.${m.command}`, m.args); }
@@ -41,15 +40,17 @@ export class PeekPanel {
 
     const poll = async () => {
       try {
-        const p = await runRelayJson<Peek>(`peek ${task}`);
-        this.panel.webview.postMessage({ type: 'peek', peek: p });
+        const p = await runRelayJson<Peek>(`session ${sessionId}`);
+        const t = await runRelayJson<{ session_id: string; transcript: string }>(`transcript ${sessionId}`);
+        const e = await runRelayJson<any>(`evidence ${sessionId}`);
+        this.panel.webview.postMessage({ type: 'peek', peek: p, transcript: t.transcript || '', evidence: e || {} });
       } catch { /* keep last frame */ }
     };
     poll();
     this.timer = setInterval(poll, 2000);
     panel.onDidDispose(() => {
       if (this.timer) { clearInterval(this.timer); }
-      PeekPanel.panels.delete(task);
+      PeekPanel.panels.delete(sessionId);
     }, null, ctx.subscriptions);
   }
 
@@ -81,21 +82,21 @@ export class PeekPanel {
       `<script nonce="${n}" src="${uri('xterm.js')}"></script>`,
       `<script nonce="${n}">`,
       'const vscode=acquireVsCodeApi();',
-      'const TASK=' + JSON.stringify(this.task) + ';',
+      'const SID=' + JSON.stringify(this.sessionId) + ';',
       'const term=new Terminal({convertEol:true,fontSize:12,scrollback:8000,cursorBlink:false,',
       ' theme:{background:"#1e1e1e",foreground:"#d4d4d4"}});',
       'term.open(document.getElementById("term"));',
       'let shown="";',
       'const facts=document.getElementById("facts"),now=document.getElementById("now");',
-      'window.addEventListener("message",function(e){if(!e.data||e.data.type!=="peek")return;var p=e.data.peek;if(!p)return;',
-      ' facts.innerHTML="<b>"+p.task+"</b> · "+(p.lane||"-")+" · "+p.state+" · "+(p.elapsed||"")+" · "+(p.files?p.files.length:0)+" files";',
-      ' now.textContent=p.now||"";',
-      ' var log=p.log||"";if(log===shown)return;',
+      'window.addEventListener("message",function(e){if(!e.data||e.data.type!=="peek")return;var p=e.data.peek||{};var ev=e.data.evidence||{};',
+      ' facts.innerHTML="<b>"+(p.task_id||p.session_id||"")+"</b> · "+(p.role||"-")+" · "+(p.state||"-")+" · "+(p.model||"-")+" · "+(ev.screenshots?ev.screenshots.length:0)+" shots";',
+      ' now.textContent=(p.repo||"") + " · " + (p.lane||"-") + " · round " + (p.review_round||0);',
+      ' var log=e.data.transcript||"";if(log===shown)return;',
       ' if(log.indexOf(shown)===0){term.write(log.slice(shown.length));}else{term.clear();term.write(log);}shown=log;});',
       'function send(c,a){vscode.postMessage({type:"command",command:c,args:a});}',
       'Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"),function(b){b.addEventListener("click",function(){',
       '  var c=b.getAttribute("data-cmd");',
-      '  if(c==="viewDiff")send("viewDiff",TASK); else if(c==="attach")send("attachTerminal",{task:TASK});});});',
+      '  if(c==="viewDiff")send("viewDiff",{session_id:SID}); else if(c==="attach")send("attachTerminal",{session_id:SID});});});',
       '</script></body></html>',
     ].join('\n');
   }

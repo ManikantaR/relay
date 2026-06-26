@@ -16,6 +16,19 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Made the VS Code extension session-aware. The Relay sidebar now reads from the v2
+       `sessions` surface instead of the old active-worker-only feed, and the detail panel now
+       pulls session facts plus transcript/evidence-backed content from the new session-centric
+       CLI commands instead of the old `peek` path. `npm run compile` is green again after the
+       refactor. Also checked the local trial path: the `smartocrprocess` repo exists locally
+       and the extension can be compiled here, but a real GitHub issue trial is currently
+       blocked because `gh auth status` shows the configured GitHub token is invalid.
+Next:  Once GitHub auth is repaired, run a real local trial against smartocrprocess issue
+       flow. In parallel, the next safe engineering move is to expose more session control and
+       session views in the extension rather than keeping the old worker-centric assumptions.
+Blocked: live GitHub-backed issue pull/dispatch trial is blocked by invalid `gh` auth on this machine.
+
+## 2026-06-26 · personal · agent
 Did:   Extended the daemon from read-mostly into a better session control surface. Added
        terminate, acknowledge-decision, request-checkpoint, and refresh actions through the
        daemon contract, plus a generic event append helper in the store. This gives the v2

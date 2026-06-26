@@ -1,15 +1,17 @@
 import * as vscode from 'vscode';
 import { runRelayJson } from './relay';
 
-// Mirrors relay's `status --json` row (py/relay_cli.py::_workers).
+// Mirrors relay's `sessions --json` row from the v2 session store.
 export interface Worker {
-  task: string; repo: string; issue: string; lane: string;
-  tier: string; state: string; line: string; branch: string; now?: string;
+  session_id: string; task_id: string; repo: string; role: string; lane: string;
+  tier: string; state: string; provider: string; model: string; effort: string;
+  review_round?: number; worktree_path?: string;
 }
 
 const ICON: Record<string, string> = {
-  PROGRESS: 'play-circle', RATE_LIMITED: 'sync', ERROR: 'error',
-  HELD: 'lock', DONE: 'pass', MISSING: 'question',
+  running: 'play-circle', rate_limited: 'sync', error: 'error',
+  held: 'lock', done: 'pass', needs_decision: 'question', paused: 'debug-pause',
+  review_requested: 'git-pull-request', approved: 'pass-filled', changes_requested: 'comment-discussion',
 };
 
 export class WorkersProvider implements vscode.TreeDataProvider<Worker> {
@@ -18,7 +20,7 @@ export class WorkersProvider implements vscode.TreeDataProvider<Worker> {
   workers: Worker[] = [];
 
   async load(): Promise<Worker[]> {
-    try { this.workers = (await runRelayJson<Worker[]>('status')) ?? []; }
+    try { this.workers = (await runRelayJson<Worker[]>('sessions')) ?? []; }
     catch { this.workers = []; }
     this._onDidChange.fire();
     return this.workers;
@@ -28,13 +30,16 @@ export class WorkersProvider implements vscode.TreeDataProvider<Worker> {
 
   getTreeItem(w: Worker): vscode.TreeItem {
     const repo = (w.repo || '').split('/').pop() || '-';
-    const it = new vscode.TreeItem(w.task, vscode.TreeItemCollapsibleState.None);
-    it.description = w.now ? `${w.lane || '-'} · ${w.now}` : `${repo} · ${w.lane || '-'} · ${w.state}`;
+    const label = w.task_id || w.session_id;
+    const it = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    it.description = `${repo} · ${w.role} · ${w.state}`;
     it.tooltip = new vscode.MarkdownString(
-      `**${w.task}** · ${repo} · ${w.lane || '-'} · ${w.state}\n\n${w.now || w.line}\n\n\`${w.branch}\``);
+      `**${label}** · ${repo} · ${w.role} · ${w.state}\n\n` +
+      `lane: \`${w.lane || '-'}\` · model: \`${w.model || '-'}\` · effort: \`${w.effort || '-'}\`\n\n` +
+      `session: \`${w.session_id}\``);
     it.command = { command: 'relay.peek', title: 'Peek', arguments: [w] };   // click row -> peek
     it.iconPath = new vscode.ThemeIcon(ICON[w.state] || 'circle-outline');
-    it.contextValue = w.state === 'HELD' ? 'worker-held' : 'worker';
+    it.contextValue = w.state === 'held' ? 'worker-held' : 'worker';
     return it;
   }
 }
