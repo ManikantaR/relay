@@ -308,6 +308,58 @@ def test_daemon_dispatch_pause_resume_nudge(tmp_path):
     assert status == 200
     assert any(e["type"] == "operator_nudge" for e in timeline["events"])
 
+def test_daemon_request_review_and_submit_changes(tmp_path):
+    st = store.Store(tmp_path)
+    status, created = daemon.handle_request("POST", "/api/dispatch", {
+        "task_id": "repo-12",
+        "repo": "o/r",
+        "project_path": "/proj",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "selection_reason": "test dispatch"
+    }, st)
+    assert status == 201
+    sid = created["session_id"]
+    daemon.handle_request("POST", f"/api/sessions/{sid}/resume", {}, st)
+
+    status, reviewer = daemon.handle_request("POST", f"/api/sessions/{sid}/request-review", {}, st)
+    assert status == 201
+    assert reviewer["role"] == "reviewer"
+
+    status, parent = daemon.handle_request("POST", f"/api/sessions/{sid}/submit-review", {
+        "review_session_id": reviewer["session_id"],
+        "approved": False,
+        "comments": [{"path": "a.py", "line": 3, "message": "tighten this check"}]
+    }, st)
+    assert status == 200
+    assert parent["state"] == "changes_requested"
+    assert parent["review_round"] == 1
+
+def test_daemon_request_review_and_submit_approval(tmp_path):
+    st = store.Store(tmp_path)
+    status, created = daemon.handle_request("POST", "/api/dispatch", {
+        "task_id": "repo-12",
+        "repo": "o/r",
+        "project_path": "/proj",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "selection_reason": "test dispatch"
+    }, st)
+    assert status == 201
+    sid = created["session_id"]
+    daemon.handle_request("POST", f"/api/sessions/{sid}/resume", {}, st)
+
+    status, reviewer = daemon.handle_request("POST", f"/api/sessions/{sid}/request-review", {}, st)
+    assert status == 201
+
+    status, parent = daemon.handle_request("POST", f"/api/sessions/{sid}/submit-review", {
+        "review_session_id": reviewer["session_id"],
+        "approved": True,
+        "comments": []
+    }, st)
+    assert status == 200
+    assert parent["state"] == "approved"
+
 
 # ------------------------------------------------------- review loop engine
 def test_spawn_reviewer_session(tmp_path):

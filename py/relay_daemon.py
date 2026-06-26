@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import relay_schema as schema
+import relay_review as review
 from relay_store import Store
 
 log = logging.getLogger("relayd")
@@ -120,6 +121,26 @@ def handle_request(method: str, path: str, body: dict, store: Store) -> tuple[in
                         nudge_type=body.get("nudge_type", "goal_correction"),
                         message=body["message"],
                         attachments=body.get("attachments", []),
+                    )
+                    return HTTPStatus.OK, session
+                if action == "request-review":
+                    session = review.spawn_reviewer(
+                        store,
+                        session_id,
+                        provider=body.get("provider", ""),
+                        model=body.get("model", ""),
+                        effort=body.get("effort", "medium"),
+                        selection_reason=body.get("selection_reason", "review request"),
+                    )
+                    return HTTPStatus.CREATED, session
+                if action == "submit-review":
+                    session = review.submit_review(
+                        store,
+                        parent_session_id=session_id,
+                        review_session_id=body["review_session_id"],
+                        comments=body.get("comments", []),
+                        approved=bool(body.get("approved", False)),
+                        actor=body.get("actor", "reviewer"),
                     )
                     return HTTPStatus.OK, session
 

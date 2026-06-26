@@ -16,6 +16,17 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Wired the review-loop runtime into the daemon/API contract. Added
+       `/api/sessions/{id}/request-review` to spawn reviewer sessions and
+       `/api/sessions/{id}/submit-review` to deliver approval or line-specific change requests
+       back into the parent session through the store. Added request-level tests for both
+       change-request and approval flows. Full suite remains green: 46 passed.
+Next:  Start joining the v2 daemon/runtime with the older orchestration path: map task
+       dispatch and status artifacts into sessions, then decide whether to route new work
+       through the v2 store first or keep v1/v2 side-by-side behind a narrower adapter.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Added the first review-loop runtime slice for Relay v2. Implemented review helpers for
        spawning branchless reviewer sessions, appending line-specific feedback back into the
        same brief, tracking review rounds, forcing `needs_decision` on cap, and marking
