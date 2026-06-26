@@ -16,6 +16,22 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added and used a first board-recovery command: `relay session-reconcile`. It mutates
+       GitHub issue labels from the trusted control plane based on session state so stale board
+       labels stop lying. Applied it to the real smartocrprocess state: issue `#12` (blocked
+       `needs_decision`) had `agent-ready`/`agent-wip` removed, and issue `#44` (done, in PR
+       review) had `agent-ready`/`agent-wip` removed and `agent-review` retained. Post-check:
+       the board is now truthful — no `ready` issues, one active `needs_decision` session
+       (`task_smartocrprocess-12`), one review item (PR `#45`). Validation stays green:
+       66 pytest tests and compileall pass.
+Next:  The next backlog item is now purely about getting a real dispatch target again, not
+       fixing Relay drift. Either restore Claude credits and explicitly re-release `#12` later,
+       or create/label a fresh Tier-1 `agent-ready` issue in smartocrprocess so the full live
+       dispatch/review loop can be exercised through the installed extension.
+Blocked: no fresh dispatchable issue currently exists in smartocrprocess. `#12` is now
+       correctly de-queued and waiting on owner/provider action; `#44` is correctly in review.
+
+## 2026-06-26 · personal · agent
 Did:   Corrected the first-pass Mission Control layout bug after live feedback. The right rail
        had been collapsing too early because the responsive breakpoint was too aggressive for a
        real VS Code editor pane; this turned the dashboard into a long stacked page instead of a

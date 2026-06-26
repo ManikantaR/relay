@@ -33,6 +33,8 @@ class Board(ABC):
     @abstractmethod
     def apply_label(self, ticket_id: str, label: str) -> None: ...
     @abstractmethod
+    def remove_label(self, ticket_id: str, label: str) -> None: ...
+    @abstractmethod
     def file_pr(self, branch: str, title: str, body: str, tier: str) -> str: ...
     @abstractmethod
     def comment_pr(self, pr_id: str, text: str) -> None: ...
@@ -64,6 +66,9 @@ class GitHubBoard(Board):
 
     def apply_label(self, ticket_id: str, label: str) -> None:
         self._gh("issue", "edit", ticket_id, "--add-label", label)
+
+    def remove_label(self, ticket_id: str, label: str) -> None:
+        self._gh("issue", "edit", ticket_id, "--remove-label", label)
 
     def file_pr(self, branch: str, title: str, body: str, tier: str) -> str:
         out = self._gh("pr", "create", "--head", branch, "--base", "main",
@@ -123,6 +128,10 @@ class TFSBoard(Board):
     def apply_label(self, ticket_id: str, label: str) -> None:
         # TODO(work): self._ps("Set-TicketTag.ps1", "-Id", ticket_id, "-Tag", label)
         raise NotImplementedError("fill apply_label() with your tag script")
+
+    def remove_label(self, ticket_id: str, label: str) -> None:
+        # TODO(work): self._ps("Remove-TicketTag.ps1", "-Id", ticket_id, "-Tag", label)
+        raise NotImplementedError("fill remove_label() with your tag script")
 
     def file_pr(self, branch: str, title: str, body: str, tier: str) -> str:
         # TODO(work): raw = self._ps("New-PR.ps1", "-Branch", branch, "-Title", title, "-Body", body)

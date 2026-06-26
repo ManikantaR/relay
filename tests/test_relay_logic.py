@@ -851,3 +851,64 @@ def test_cli_session_action_commands(tmp_path, monkeypatch):
     assert any(e["type"] == "checkpoint_written" for e in st.timeline(created["session_id"]))
     assert cli.cmd_session_terminate([created["session_id"]]) == 0
     assert st.get_session(created["session_id"])["state"] == "terminated"
+
+def test_cli_session_reconcile_marks_needs_decision_tasks_not_ready(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "item": "12", "repo": "o/r", "project": "/proj", "tier": "2", "lane": "claude"
+    }))
+    (td / "status.md").write_text("ERROR exit=1 2026-06-26T00:00:00+00:00\n")
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+
+    actions = []
+    class FakeBoard:
+        def remove_label(self, ticket_id, label): actions.append(("remove", ticket_id, label))
+        def apply_label(self, ticket_id, label): actions.append(("add", ticket_id, label))
+
+    monkeypatch.setattr(cli, "get_board", lambda repo: FakeBoard())
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_session_reconcile(["task_smartocrprocess-12", "--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["state"] == "needs_decision"
+    assert ("remove", "12", "agent-wip") in actions
+    assert ("remove", "12", "agent-ready") in actions
+
+def test_cli_session_reconcile_marks_done_tasks_reviewing(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    td = tmp_path / "smartocrprocess-44"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "item": "44", "repo": "o/r", "project": "/proj", "tier": "1", "lane": "copilot"
+    }))
+    (td / "status.md").write_text("DONE 2026-06-26T00:00:00+00:00\n")
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+
+    actions = []
+    class FakeBoard:
+        def remove_label(self, ticket_id, label): actions.append(("remove", ticket_id, label))
+        def apply_label(self, ticket_id, label): actions.append(("add", ticket_id, label))
+
+    monkeypatch.setattr(cli, "get_board", lambda repo: FakeBoard())
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_session_reconcile(["task_smartocrprocess-44", "--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["state"] == "done"
+    assert ("remove", "44", "agent-ready") in actions
+    assert ("remove", "44", "agent-wip") in actions
+    assert ("add", "44", "agent-review") in actions

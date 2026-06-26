@@ -545,6 +545,62 @@ def cmd_session_refresh(argv: list[str]) -> int:
     return 0
 
 
+def cmd_session_reconcile(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay session-reconcile <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+        sess = st.get_session(sid)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if not sid.startswith("task_"):
+        print("session-reconcile currently supports bridged task sessions only", file=sys.stderr); return 1
+    task = sid[len("task_"):]
+    meta = _meta(task)
+    item = meta.get("item") or (task.rsplit("-", 1)[-1] if "-" in task else "")
+    repo = sess.get("repo") or meta.get("repo", "")
+    if not item or not repo:
+        print(f"cannot reconcile board labels for {sid}", file=sys.stderr); return 1
+    board = get_board(repo)
+    state = sess.get("state", "")
+    remove, add = [], []
+    if state in {"needs_decision", "error", "held", "terminated"}:
+        remove = ["agent-wip", "agent-ready", "agent-review"]
+    elif state in {"review_requested", "approved", "done"}:
+        remove = ["agent-wip", "agent-ready"]
+        add = ["agent-review"]
+    else:
+        print(f"session {sid} is in state {state}; no board reconciliation rule applies", file=sys.stderr); return 1
+    applied_remove, applied_add = [], []
+    for label in remove:
+        try:
+            board.remove_label(str(item), label)
+            applied_remove.append(label)
+        except Exception:
+            pass
+    for label in add:
+        try:
+            board.apply_label(str(item), label)
+            applied_add.append(label)
+        except Exception:
+            pass
+    data = {
+        "session_id": sid,
+        "task_id": task,
+        "issue": str(item),
+        "repo": repo,
+        "state": state,
+        "removed": applied_remove,
+        "added": applied_add,
+    }
+    if "--json" in argv:
+        print(json.dumps(data)); return 0
+    print(json.dumps(data, indent=2))
+    return 0
+
+
 def _opt(argv: list[str], flag: str, default=None):
     return argv[argv.index(flag) + 1] if flag in argv else default
 
@@ -740,7 +796,7 @@ COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatc
             "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,
             "transcript": cmd_transcript, "evidence": cmd_evidence, "session-diff": cmd_session_diff,
             "session-terminate": cmd_session_terminate, "session-checkpoint": cmd_session_checkpoint,
-            "session-refresh": cmd_session_refresh,
+            "session-refresh": cmd_session_refresh, "session-reconcile": cmd_session_reconcile,
             "status": cmd_status, "board": cmd_board, "peek": cmd_peek, "diff": cmd_diff,
             "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}
