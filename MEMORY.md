@@ -16,6 +16,44 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Consolidated the entire Relay v2 session sequence into one durable checkpoint. What was
+       planned at the start of this run was: finish the session-centric Relay v2 runtime,
+       bridge the older v1 task model into it, expose operator control/inspection through CLI
+       and daemon, make the VS Code extension session-aware, make the extension installable and
+       professional enough for real daily use, and then drive toward a live smartocrprocess
+       trial. What is now COMPLETE, in order, is:
+       (1) v2 session store/state machine/daemon scaffold; (2) review-loop runtime and daemon
+       hooks; (3) v1->v2 bridge for tasks/status/close-out; (4) CLI session inspection
+       (`sessions`, `session`, `timeline`, `transcript`, `evidence`, `session-diff`);
+       (5) CLI/daemon session control (`terminate`, `checkpoint`, `refresh`, pause/resume/
+       review actions); (6) board/dashboard feed aligned to v2 sessions; (7) VS Code
+       extension made session-aware; (8) `relay doctor` readiness audit; (9) `relay
+       vscode-package` and `relay vscode-install`; (10) local `vsce` install plus verified
+       VSIX packaging and successful VS Code installation; (11) runtime classification fix so
+       quota-blocked tasks surface as `needs_decision`; (12) Mission Control redesigned from a
+       sparse kanban into a selected-session operator console and reinstalled into VS Code.
+       Current live smartocrprocess state is: no `ready` items, one active session
+       `task_smartocrprocess-12` in `needs_decision` (Tier-2, Claude-credit blocked), and PR
+       `#45` in review for issue `#44`.
+Next:  Prioritized remaining backlog:
+       P1. Open the updated VS Code Mission Control and do a live UI smoke check: selected
+       session hydration, grouped tree, right-rail triage, and all focus-card actions.
+       P2. Unblock or replace the live trial target: either restore Claude credits and retry
+       Tier-2 issue `#12`, or create/release a fresh Tier-1 `agent-ready` issue in
+       smartocrprocess so the full dispatch/review loop can be exercised immediately.
+       P3. Run a real end-to-end trial through the installed extension: dispatch, inspect,
+       checkpoint/nudge, review handoff, and reconcile resulting session/board state.
+       P4. Clean up board/workflow truth: decide how Relay should reconcile stale GitHub labels
+       like `agent-ready`+`agent-wip` on dead tasks, and whether owner-facing recovery actions
+       (retry/release/clear stale WIP) should be first-class commands.
+       P5. Refine operator UX after live use: inline diff/evidence preview, optional
+       terminal-first split mode, and possibly a smaller secondary queue-board toggle instead
+       of the old board-first layout.
+Blocked: external repo/provider state, not core Relay architecture. Specifically: issue `#12`
+       cannot advance without Claude credits because Tier-2 never fails over; issue `#44` is
+       already in review; there are no fresh `agent-ready` issues to dispatch right now.
+
+## 2026-06-26 · personal · agent
 Did:   Rebuilt the VS Code Mission Control UI around the approved focused-operator design.
        The dashboard webview is no longer a mostly empty kanban; it is now a selected-session
        console with top summary stats, a center focus card, timeline/changed-files/evidence/
