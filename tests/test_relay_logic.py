@@ -364,6 +364,54 @@ def test_daemon_request_review_and_submit_approval(tmp_path):
     assert status == 200
     assert parent["state"] == "approved"
 
+def test_daemon_terminate_ack_checkpoint(tmp_path):
+    st = store.Store(tmp_path)
+    status, created = daemon.handle_request("POST", "/api/dispatch", {
+        "task_id": "repo-12",
+        "repo": "o/r",
+        "project_path": "/proj",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "selection_reason": "test dispatch"
+    }, st)
+    assert status == 201
+    sid = created["session_id"]
+    daemon.handle_request("POST", f"/api/sessions/{sid}/resume", {}, st)
+
+    status, body = daemon.handle_request("POST", f"/api/sessions/{sid}/request-checkpoint", {
+        "actor": "owner", "summary": "checkpoint now"
+    }, st)
+    assert status == 200
+    assert any(e["type"] == "checkpoint_written" for e in st.timeline(sid))
+
+    daemon.handle_request("POST", f"/api/sessions/{sid}/pause", {}, st)
+    status, body = daemon.handle_request("POST", f"/api/sessions/{sid}/ack-decision", {
+        "actor": "owner", "target_state": "running", "reason": "resume after decision"
+    }, st)
+    assert status == 200
+    assert body["state"] == "running"
+
+    status, body = daemon.handle_request("POST", f"/api/sessions/{sid}/terminate", {
+        "actor": "owner", "reason": "stop trial"
+    }, st)
+    assert status == 200
+    assert body["state"] == "terminated"
+
+def test_daemon_refresh_bridged_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    (td / "active").touch()
+    st = store.Store(tmp_path)
+    bridge.ensure_session_for_task("smartocrprocess-12", store=st)
+    status, body = daemon.handle_request("POST", "/api/sessions/task_smartocrprocess-12/refresh", {}, st)
+    assert status == 200
+    assert body["state"] == "running"
+
 
 # ------------------------------------------------------- review loop engine
 def test_spawn_reviewer_session(tmp_path):

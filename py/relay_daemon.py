@@ -153,6 +153,38 @@ def handle_request(method: str, path: str, body: dict, store: Store) -> tuple[in
                         actor=body.get("actor", "reviewer"),
                     )
                     return HTTPStatus.OK, session
+                if action == "terminate":
+                    session = store.transition_session(
+                        session_id, "terminated", actor=body.get("actor", "owner"),
+                        reason=body.get("reason", "manual terminate")
+                    )
+                    return HTTPStatus.OK, session
+                if action == "ack-decision":
+                    current = store.get_session(session_id)
+                    target = body.get("target_state", "running")
+                    actor = body.get("actor", "owner")
+                    reason = body.get("reason", "decision acknowledged")
+                    if current["state"] != target:
+                        session = store.transition_session(session_id, target, actor=actor, reason=reason)
+                    else:
+                        session = current
+                    store.add_event(session_id, "worker_acknowledged", actor, "decision acknowledged",
+                                    {"target_state": target, "reason": reason})
+                    return HTTPStatus.OK, session
+                if action == "request-checkpoint":
+                    current = store.get_session(session_id)
+                    actor = body.get("actor", "owner")
+                    summary = body.get("summary", "checkpoint requested")
+                    store.add_event(session_id, "checkpoint_written", actor, summary,
+                                    {"requested": True})
+                    return HTTPStatus.OK, current
+                if action == "refresh":
+                    try:
+                        session = bridge.sync_task(session_id[len("task_"):] if session_id.startswith("task_") else session_id,
+                                                   reason=body.get("reason", "manual refresh"), store=store)
+                    except Exception:
+                        session = store.get_session(session_id)
+                    return HTTPStatus.OK, session
 
     return HTTPStatus.NOT_FOUND, {"error": "not found"}
 

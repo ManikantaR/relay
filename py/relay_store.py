@@ -190,6 +190,12 @@ class Store:
         self.append_event(session_id, ack)
         return self.get_session(session_id)
 
+    def add_event(self, session_id: str, etype: str, actor: str, summary: str,
+                  payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        ev = schema.make_event(session_id, etype, actor, summary, payload or {},
+                               sequence=self.next_sequence(session_id))
+        return self.append_event(session_id, ev)
+
     def _upsert_session_row(self, doc: dict[str, Any]) -> None:
         with self._connect() as conn:
             conn.execute(

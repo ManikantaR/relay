@@ -16,6 +16,17 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Extended the daemon from read-mostly into a better session control surface. Added
+       terminate, acknowledge-decision, request-checkpoint, and refresh actions through the
+       daemon contract, plus a generic event append helper in the store. This gives the v2
+       runtime enough control verbs to start behaving like a real operator API instead of just
+       a passive inspection layer. Full suite is green: 56 passed.
+Next:  Inspect the local smartocrprocess setup and see how safely we can run a real local
+       trial through the current Relay flow, then check the VS Code extension build/install
+       path against the new session-centric runtime.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Extended the v2 session-centric inspection path with transcript, evidence, and diff
        reads. Added CLI commands `relay transcript`, `relay evidence`, and
        `relay session-diff`, plus matching daemon endpoints under `/api/sessions/{id}/...`.
