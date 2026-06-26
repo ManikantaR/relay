@@ -16,6 +16,22 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Rebuilt the VS Code Mission Control UI around the approved focused-operator design.
+       The dashboard webview is no longer a mostly empty kanban; it is now a selected-session
+       console with top summary stats, a center focus card, timeline/changed-files/evidence/
+       transcript panels, and a right rail for `Needs Decision`, `Review Queue`, and `Ready`
+       queues. Wired it to fetch real session detail through the existing Relay CLI surfaces
+       instead of inventing parallel state. Also tightened the native tree: grouped sessions
+       into `Needs Decision`, `Active`, and `Done`, and fixed the status bar to count true
+       active sessions. Validation is green: extension compile passes, 64 pytest tests pass,
+       and the redesigned VSIX was packaged and reinstalled into VS Code successfully.
+Next:  Open the updated Relay Mission Control in VS Code and verify the live interaction loop:
+       selected session hydration, action buttons, right-rail triage, and grouped worker tree.
+       After that, decide whether to add a terminal-first split mode or inline diff/evidence
+       previews based on the live feel.
+Blocked: none in Relay itself; live smartocrprocess dispatch still depends on repo/provider state (`#12` is claude-credit blocked, `#44` already in review, no fresh ready issue).
+
+## 2026-06-26 · personal · agent
 Did:   Improved the runtime classification around the real smartocrprocess blocker. Relay now
        treats provider messages like "usage credits required" as a quota/rate-cap signature in
        the finisher, and the v1->v2 bridge now maps inactive `ERROR` tasks into

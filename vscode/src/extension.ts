@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { WorkersProvider, Worker } from './workersView';
 import { runRelay, runRelayJson, execPrefix } from './relay';
-import { Dashboard, Board } from './dashboard';
+import { Dashboard, Board, SessionDetail } from './dashboard';
 import { PeekPanel } from './peekPanel';
 
 function taskOf(arg: any): string | undefined {
@@ -10,6 +10,49 @@ function taskOf(arg: any): string | undefined {
 
 function sessionOf(arg: any): string | undefined {
   return typeof arg === 'string' ? arg : arg?.session_id;
+}
+
+function parseDiffFiles(diff: string): Array<{ path: string; added: number; removed: number }> {
+  const files: Array<{ path: string; added: number; removed: number }> = [];
+  let current: { path: string; added: number; removed: number } | undefined;
+  for (const line of diff.split('\n')) {
+    const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    if (m) {
+      if (current) { files.push(current); }
+      current = { path: m[2], added: 0, removed: 0 };
+      continue;
+    }
+    if (!current) { continue; }
+    if (line.startsWith('+++') || line.startsWith('---')) { continue; }
+    if (line.startsWith('+')) { current.added += 1; continue; }
+    if (line.startsWith('-')) { current.removed += 1; }
+  }
+  if (current) { files.push(current); }
+  return files.slice(0, 12);
+}
+
+async function loadDashboardDetail(sessionId: string): Promise<SessionDetail | null> {
+  try {
+    const session = await runRelayJson<any>(`session ${sessionId}`);
+    const timeline = await runRelayJson<any[]>(`timeline ${sessionId}`);
+    const evidence = await runRelayJson<any>(`evidence ${sessionId}`);
+    const transcript = await runRelayJson<{ session_id: string; transcript: string }>(`transcript ${sessionId}`);
+    const diff = await runRelay(`session-diff ${sessionId}`);
+    const transcriptPreview = (transcript.transcript || '')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .slice(-8);
+    return {
+      session,
+      timeline,
+      evidence,
+      transcriptPreview,
+      changedFiles: parseDiffFiles(diff),
+      diffAvailable: diff.trim().length > 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function activate(ctx: vscode.ExtensionContext): void {
@@ -23,8 +66,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
   // Fast, file-cheap: the tree + status bar (relay status reads disk).
   const refresh = async (): Promise<void> => {
     const ws = await provider.load();
+    const active = ws.filter(w => !['done', 'approved', 'terminated'].includes(w.state)).length;
     const held = ws.filter(w => w.state === 'held').length;
-    status.text = `$(rocket) relay: ${ws.length} active${held ? ` · ${held} held` : ''}`;
+    const needs = ws.filter(w => w.state === 'needs_decision').length;
+    status.text = `$(rocket) relay: ${active} active${needs ? ` · ${needs} needs decision` : held ? ` · ${held} held` : ''}`;
     status.tooltip = 'Relay mission control';
     status.show();
   };
@@ -41,7 +86,34 @@ export function activate(ctx: vscode.ExtensionContext): void {
     ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
   reg('relay.refresh', () => { refresh(); refreshBoard(); });
-  reg('relay.openDashboard', () => Dashboard.show(ctx, () => { refresh(); refreshBoard(); }));
+  const handleDashboardMessage = async (m: any): Promise<void> => {
+    if (!m || typeof m.type !== 'string') { return; }
+    if (m.type === 'command' && typeof m.command === 'string') {
+      await vscode.commands.executeCommand(`relay.${m.command}`, m.args);
+      return;
+    }
+    if (m.type === 'openUrl' && m.url) {
+      vscode.env.openExternal(vscode.Uri.parse(m.url));
+      return;
+    }
+    if (m.type === 'dispatchId') {
+      await dispatch(m.id, m.repo);
+      return;
+    }
+    if (m.type === 'selectSession' && m.sessionId && Dashboard.current) {
+      Dashboard.current.updateDetail(await loadDashboardDetail(m.sessionId));
+      return;
+    }
+    if (m.type === 'sessionCommand' && m.sessionId) {
+      const arg = { session_id: m.sessionId, task_id: m.taskId || '' };
+      await vscode.commands.executeCommand(`relay.${m.command}`, arg);
+      if (Dashboard.current) {
+        Dashboard.current.updateDetail(await loadDashboardDetail(m.sessionId));
+      }
+    }
+  };
+
+  reg('relay.openDashboard', () => Dashboard.show(ctx, handleDashboardMessage, () => { refresh(); refreshBoard(); }));
 
   const dispatch = async (id?: string, repo?: string): Promise<void> => {
     if (!id) { id = await vscode.window.showInputBox({ prompt: 'Issue id to dispatch' }); }

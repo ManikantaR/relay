@@ -1,16 +1,24 @@
 import * as vscode from 'vscode';
 
-// Mission Control = an agent KANBAN board (the convergent pattern across Vibe Kanban,
-// Nimbalyst, Cline, Conductor): columns are lifecycle states and cards sort themselves by
-// the worker's real state. Fed by `relay board --json` ({ready, active, review}).
-// The worker LIST stays a native TreeView; this webview earns its place as the board the
-// tree can't be. Best practice kept: --vscode-* variables, CSP + nonce, getState, a11y.
+export interface Board {
+  ready: any[];
+  active: any[];
+  review: any[];
+}
 
-export interface Board { ready: any[]; active: any[]; review: any[]; }
+export interface SessionDetail {
+  session: any;
+  timeline: any[];
+  evidence: any;
+  transcriptPreview: string[];
+  changedFiles: Array<{ path: string; added: number; removed: number }>;
+  diffAvailable: boolean;
+}
 
 function makeNonce(): string {
   const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let s = ''; for (let i = 0; i < 32; i++) { s += c.charAt(Math.floor(Math.random() * c.length)); }
+  let s = '';
+  for (let i = 0; i < 32; i++) { s += c.charAt(Math.floor(Math.random() * c.length)); }
   return s;
 }
 
@@ -18,28 +26,43 @@ export class Dashboard {
   static current: Dashboard | undefined;
   private panel: vscode.WebviewPanel;
 
-  static show(ctx: vscode.ExtensionContext, onReady: () => void): void {
-    if (Dashboard.current) { Dashboard.current.panel.reveal(); onReady(); return; }
+  static show(
+    ctx: vscode.ExtensionContext,
+    onCommand: (msg: any) => void,
+    onReady: () => void,
+  ): void {
+    if (Dashboard.current) {
+      Dashboard.current.panel.reveal();
+      onReady();
+      return;
+    }
     const panel = vscode.window.createWebviewPanel(
-      'relayDashboard', 'Relay Mission Control', vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: false });
-    Dashboard.current = new Dashboard(panel, ctx);
+      'relayDashboard',
+      'Relay Mission Control',
+      vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: false },
+    );
+    Dashboard.current = new Dashboard(panel, ctx, onCommand);
     panel.onDidDispose(() => (Dashboard.current = undefined), null, ctx.subscriptions);
     onReady();
   }
 
-  constructor(panel: vscode.WebviewPanel, ctx: vscode.ExtensionContext) {
+  constructor(
+    panel: vscode.WebviewPanel,
+    ctx: vscode.ExtensionContext,
+    onCommand: (msg: any) => void,
+  ) {
     this.panel = panel;
     panel.webview.html = this.html();
-    panel.webview.onDidReceiveMessage((m) => {
-      if (m && m.type === 'command' && typeof m.command === 'string') {
-        vscode.commands.executeCommand(`relay.${m.command}`, m.args);
-      }
-    }, null, ctx.subscriptions);
+    panel.webview.onDidReceiveMessage((m) => onCommand(m), null, ctx.subscriptions);
   }
 
   update(board: Board): void {
     this.panel.webview.postMessage({ type: 'board', board });
+  }
+
+  updateDetail(detail: SessionDetail | null): void {
+    this.panel.webview.postMessage({ type: 'detail', detail });
   }
 
   private html(): string {
@@ -49,73 +72,119 @@ export class Dashboard {
       '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
       `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
       `<style nonce="${n}">`,
-      'body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);font-size:var(--vscode-font-size);margin:0;padding:14px}',
+      'body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);font-size:var(--vscode-font-size);margin:0;padding:16px;background:var(--vscode-editor-background)}',
+      '.shell{display:grid;grid-template-columns:minmax(0,1fr) 308px;gap:14px;min-height:calc(100vh - 32px)}',
+      '.main{min-width:0}',
+      '.side{min-width:0}',
       '.hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px}',
       'h2{font-weight:500;font-size:15px;margin:0}',
-      '.badge{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:10px;padding:2px 9px;font-size:11px}',
-      '.toolbar{margin-left:auto;display:flex;gap:6px}',
-      '.btn{font-family:inherit;font-size:12px;border:none;border-radius:2px;padding:4px 11px;cursor:pointer;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}',
+      '.summary{display:flex;align-items:center;gap:8px}',
+      '.badge{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:999px;padding:3px 10px;font-size:11px}',
+      '.toolbar{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}',
+      '.btn{font-family:inherit;font-size:12px;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}',
       '.btn:hover{background:var(--vscode-button-hoverBackground)}',
       '.btn.sec{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}',
-      '.btn:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}',
-      '.cols{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start}',
-      '.col{min-width:0}',
-      '.colh{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.04em;color:var(--vscode-descriptionForeground);padding:0 2px 8px;text-transform:uppercase}',
-      '.count{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:9px;padding:0 6px;font-size:10px}',
-      '.card{background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:5px;padding:9px 10px;margin-bottom:8px}',
-      '.card.attn{border-color:var(--vscode-charts-red)}',
-      '.t1{font-size:12.5px;color:var(--vscode-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.meta{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}',
-      '.chip{font-size:10.5px;border-radius:9px;padding:1px 7px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}',
-      '.chip.t2{background:var(--vscode-charts-purple);color:var(--vscode-editor-background)}',
-      '.mut{color:var(--vscode-descriptionForeground);font-size:11px}',
-      '.now{font-family:var(--vscode-editor-font-family);font-size:11px;color:var(--vscode-foreground);margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.mono{font-family:var(--vscode-editor-font-family)}',
-      '.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}',
-      '.d-blue{background:var(--vscode-charts-blue)}.d-yellow{background:var(--vscode-charts-yellow)}',
-      '.d-red{background:var(--vscode-charts-red)}.d-purple{background:var(--vscode-charts-purple)}',
-      '.cardbtn{margin-top:8px;font-size:11px;border:none;border-radius:2px;padding:3px 9px;cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}',
-      '.cardbtn:hover{background:var(--vscode-button-hoverBackground);color:var(--vscode-button-foreground)}',
-      '.empty{color:var(--vscode-descriptionForeground);font-size:11px;padding:6px 2px}',
+      '.btn.danger{background:transparent;color:var(--vscode-errorForeground);border:1px solid color-mix(in srgb, var(--vscode-errorForeground) 45%, transparent)}',
+      '.btn:focus-visible,.session-card:focus-visible,.queue-card:focus-visible,.mini-card:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}',
+      '.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}',
+      '.stat{background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:6px;padding:10px 12px}',
+      '.stat .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--vscode-descriptionForeground);margin-bottom:8px}',
+      '.stat .v{font-size:24px;line-height:1;color:var(--vscode-foreground)}',
+      '.stat .s{margin-top:8px;height:10px;border-radius:999px;background:linear-gradient(90deg, var(--vscode-charts-blue), transparent)}',
+      '.panel{background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:6px}',
+      '.session-card{padding:12px 14px;margin-bottom:12px}',
+      '.session-top{display:flex;align-items:flex-start;gap:10px}',
+      '.session-top .grow{min-width:0;flex:1}',
+      '.title{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.sub{font-size:11px;color:var(--vscode-descriptionForeground);margin-top:4px}',
+      '.stale{font-size:11px;color:var(--vscode-descriptionForeground);white-space:nowrap}',
+      '.chips,.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}',
+      '.chip{font-size:10.5px;border-radius:999px;padding:2px 8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}',
+      '.chip.warn{background:color-mix(in srgb, var(--vscode-charts-orange) 24%, transparent);color:var(--vscode-charts-orange)}',
+      '.chip.danger{background:color-mix(in srgb, var(--vscode-errorForeground) 18%, transparent);color:var(--vscode-errorForeground)}',
+      '.chip.t2{background:color-mix(in srgb, var(--vscode-charts-purple) 35%, transparent);color:var(--vscode-charts-purple)}',
+      '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}',
+      '.grid.two{grid-template-columns:1.2fr .8fr}',
+      '.box{padding:12px 14px;min-width:0}',
+      '.box h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--vscode-descriptionForeground);margin:0 0 10px}',
+      '.timeline-item,.transcript-line{font-size:12px;line-height:1.45;margin-bottom:8px}',
+      '.timeline-item:last-child,.transcript-line:last-child,.file:last-child,.evidence-row:last-child,.queue-card:last-child,.mini-card:last-child{margin-bottom:0}',
+      '.time{color:var(--vscode-descriptionForeground);display:inline-block;min-width:62px}',
+      '.event{color:var(--vscode-foreground)}',
+      '.mut{color:var(--vscode-descriptionForeground)}',
+      '.link{display:inline-flex;align-items:center;gap:4px;color:var(--vscode-textLink-foreground);text-decoration:none;font-size:12px;margin-top:8px}',
+      '.link:hover{text-decoration:underline}',
+      '.file{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;font-size:12px;line-height:1.4;margin-bottom:8px}',
+      '.path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family)}',
+      '.delta{display:flex;gap:10px;font-family:var(--vscode-editor-font-family)}',
+      '.add{color:var(--vscode-charts-green)}',
+      '.del{color:var(--vscode-charts-red)}',
+      '.evidence-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;font-size:12px;line-height:1.45;margin-bottom:6px}',
+      '.ok{color:var(--vscode-testing-iconPassed)}',
+      '.bad{color:var(--vscode-errorForeground)}',
+      '.warn{color:var(--vscode-charts-orange)}',
+      '.queue-section{margin-bottom:12px}',
+      '.queue-head{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--vscode-descriptionForeground)}',
+      '.count{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:999px;padding:0 7px;font-size:10px}',
+      '.queue-card,.mini-card{padding:12px 14px}',
+      '.queue-card{margin-bottom:10px}',
+      '.queue-card.attn,.mini-card.attn{border:1px solid color-mix(in srgb, var(--vscode-errorForeground) 45%, transparent)}',
+      '.queue-title{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.queue-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}',
+      '.queue-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}',
+      '.empty{padding:12px 14px;color:var(--vscode-descriptionForeground);font-size:12px}',
+      '.notice{padding:10px 12px;border-top:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-size:11px}',
+      '@media (max-width: 1320px){.shell{grid-template-columns:minmax(0,1fr)}.side{order:-1}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.grid,.grid.two{grid-template-columns:1fr}}',
       '</style></head><body>',
-      '<div class="hdr"><h2>Relay — Mission Control</h2><span class="badge" id="summary">…</span>',
+      '<div class="hdr">',
+      '<h2>Relay Mission Control</h2>',
+      '<div class="summary"><span class="badge" id="summary">Loading…</span></div>',
       '<div class="toolbar" role="toolbar" aria-label="Relay actions">',
-      '<button class="btn" data-cmd="pull" aria-label="Dispatch an issue">Dispatch…</button>',
-      '<button class="btn sec" data-cmd="togglePause" aria-label="Pause or resume auto-dispatch">Pause / Resume</button>',
-      '<button class="btn sec" data-cmd="refresh" aria-label="Refresh board">Refresh</button>',
+      '<button class="btn" data-cmd="pull">Dispatch…</button>',
+      '<button class="btn sec" data-cmd="togglePause">Pause All</button>',
+      '<button class="btn sec" data-cmd="refresh">Refresh</button>',
       '</div></div>',
-      '<div class="cols" id="cols" role="list" aria-label="Workflow board"><div class="empty">Loading…</div></div>',
+      '<div class="shell">',
+      '<div class="main">',
+      '<div class="stats" id="stats"></div>',
+      '<div class="panel session-card" id="focus"></div>',
+      '<div class="grid" id="grid-top"></div>',
+      '<div class="grid two" id="grid-bottom"></div>',
+      '</div>',
+      '<div class="side">',
+      '<div class="queue-section"><div class="queue-head">Needs Decision <span class="count" id="needs-count">0</span></div><div id="needs"></div></div>',
+      '<div class="queue-section"><div class="queue-head">Review Queue <span class="count" id="review-count">0</span></div><div id="review"></div></div>',
+      '<div class="queue-section"><div class="queue-head">Ready Queue <span class="count" id="ready-count">0</span></div><div id="ready"></div></div>',
+      '</div></div>',
       `<script nonce="${n}">`,
       'const vscode=acquireVsCodeApi();',
-      'const root=document.getElementById("cols"),sum=document.getElementById("summary");',
-      'function esc(s){return (s||"").replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}',
-      'function send(command,args){vscode.postMessage({type:"command",command:command,args:args});}',
-      'function t2(t){return t==="2"?"<span class=\\"chip t2\\">tier-2</span>":"";}',
-      'function readyCard(r){var lane=r.lane?("<span class=\\"chip\\">"+esc(r.lane)+"</span>"):"<span class=\\"chip\\">HOLD</span>";',
-      ' return "<div class=\\"card\\"><div class=\\"t1\\">"+esc(r.title)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc(r.repo.split("/").pop())+"#"+esc(r.id)+"</span>"+t2(r.tier)+lane+"</div>'
-        + '<button class=\\"cardbtn\\" data-act=\\"dispatch\\" data-id=\\""+esc(r.id)+"\\" data-repo=\\""+esc(r.repo)+"\\">Dispatch</button></div>";}',
-      'function workerCard(w,attn){var C={running:"blue",rate_limited:"yellow",error:"red",held:"purple",paused:"yellow",review_requested:"purple",needs_decision:"red"};',
-      ' return "<div class=\\"card"+(attn?" attn":"")+"\\"><div class=\\"t1 mono\\">"+esc(w.task)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((w.repo||"").split("/").pop())+"</span><span class=\\"chip\\">"+esc(w.lane||"-")+"</span><span class=\\"mut\\"><span class=\\"dot d-"+(C[w.state]||"blue")+"\\"></span>"+esc(w.state)+"</span></div>"+(w.now?"<div class=\\"now\\">"+esc(w.now)+"</div>":"")+"<button class=\\"cardbtn\\" data-act=\\"peek\\" data-session=\\""+esc(w.session_id||"")+"\\">Peek</button></div>";}',
-      'function reviewCard(p){return "<div class=\\"card\\"><div class=\\"t1\\">"+esc(p.title)+"</div><div class=\\"meta\\"><span class=\\"mut\\">"+esc((p.repo||"").split("/").pop())+"#"+esc(p.id)+"</span>"+t2(p.tier)+"</div>'
-        + '<button class=\\"cardbtn\\" data-act=\\"open\\" data-url=\\""+esc(p.url)+"\\">"+(p.tier==="2"?"Read every line":"Review PR")+"</button></div>";}',
-      'function col(name,count,inner){return "<div class=\\"col\\" role=\\"listitem\\"><div class=\\"colh\\">"+name+"<span class=\\"count\\">"+count+"</span></div>"+(inner||"<div class=\\"empty\\">—</div>")+"</div>";}',
-      'function render(b){b=b||{ready:[],active:[],review:[]};',
-      ' var working=b.active.filter(function(w){return w.state==="running";});',
-      ' var waiting=b.active.filter(function(w){return w.state==="rate_limited"||w.state==="paused";});',
-      ' var attn=b.active.filter(function(w){return w.state==="error"||w.state==="held"||w.state==="needs_decision"||w.state==="review_requested";});',
-      ' sum.textContent=b.active.length+" active \\u00b7 "+b.review.length+" in review";',
-      ' root.innerHTML=col("Ready",b.ready.length,b.ready.map(readyCard).join(""))',
-      '  +col("Working",working.length,working.map(function(w){return workerCard(w,false);}).join(""))',
-      '  +col("Waiting",waiting.length,waiting.map(function(w){return workerCard(w,false);}).join(""))',
-      '  +col("Review",b.review.length+attn.length,attn.map(function(w){return workerCard(w,true);}).join("")+b.review.map(reviewCard).join(""));',
-      ' Array.prototype.forEach.call(root.querySelectorAll("[data-act]"),function(el){el.addEventListener("click",function(){',
-      '   var a=el.getAttribute("data-act");',
-      '   if(a==="dispatch")send("dispatchId",{id:el.getAttribute("data-id"),repo:el.getAttribute("data-repo")});',
-      '   else if(a==="open")send("openUrl",{url:el.getAttribute("data-url")});',
-      '   else if(a==="peek")send("peek",{session_id:el.getAttribute("data-session")});});});}',
-      'window.addEventListener("message",function(e){if(e.data&&e.data.type==="board"){vscode.setState(e.data.board);render(e.data.board);}});',
-      'Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"),function(b){b.addEventListener("click",function(){send(b.getAttribute("data-cmd"));});});',
-      'render(vscode.getState());',
+      'const state=vscode.getState()||{board:{ready:[],active:[],review:[]},selectedSessionId:"",detail:null};',
+      'const byId=(id)=>document.getElementById(id);',
+      'const esc=(s)=>String(s||"").replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]));',
+      'const ago=(s)=>s||"";',
+      'const chip=(label,cls="")=>`<span class="chip ${cls}">${esc(label)}</span>`;',
+      'const preferSession=(board)=>{const rows=board.active||[];const rank={needs_decision:0,running:1,review_requested:2,paused:3,rate_limited:4,held:5,error:6,done:9,terminated:9};return rows.slice().sort((a,b)=>(rank[a.state]??8)-(rank[b.state]??8))[0]?.session_id||"";};',
+      'const send=(type,payload)=>vscode.postMessage(Object.assign({type},payload||{}));',
+      'function ensureSelected(){const active=(state.board.active||[]).map((r)=>r.session_id);if(!state.selectedSessionId||!active.includes(state.selectedSessionId)){state.selectedSessionId=preferSession(state.board);}if(state.selectedSessionId){send("selectSession",{sessionId:state.selectedSessionId});}}',
+      'function statCard(label,value,cls){return `<div class="stat"><div class="k">${label}</div><div class="v">${value}</div><div class="s ${cls||""}"></div></div>`;}',
+      'function renderStats(){const b=state.board||{ready:[],active:[],review:[]};const active=b.active||[];const waiting=active.filter((r)=>["paused","rate_limited"].includes(r.state)).length;const working=active.filter((r)=>r.state==="running").length;const needs=active.filter((r)=>r.state==="needs_decision").length;byId("summary").textContent=`${active.length} active · ${b.review.length} in review`;byId("stats").innerHTML=[statCard("Active",active.length,"active"),statCard("Working",working,"working"),statCard("Waiting",waiting,"waiting"),statCard("Review",b.review.length,"review"),statCard("Needs Decision",needs,"needs")].join("");}',
+      'function renderFocus(){const d=state.detail;const focus=byId("focus");if(!d||!d.session){focus.innerHTML=`<div class="empty">Select an active session to inspect its timeline, evidence, transcript, and controls.</div>`;byId("grid-top").innerHTML="";byId("grid-bottom").innerHTML="";return;}const s=d.session;focus.innerHTML=`<div class="session-top"><div class="grow"><div class="title mono">${esc(s.task_id||s.session_id)}</div><div class="sub">${esc((s.repo||"").split("/").pop())} · ${esc(s.role||"-")} · ${esc(s.model||s.lane||"-")}</div><div class="chips">${chip(`lane: ${s.lane||"-"}`)}${chip(`tier: ${s.tier==="2"?"tier-2":"tier-1"}`,s.tier==="2"?"t2":"")}${chip(`state: ${s.state||"-"}`,["needs_decision","error"].includes(s.state)?"danger":(s.state==="rate_limited"?"warn":""))}</div><div class="actions"><button class="btn sec" data-session-cmd="peek">Peek</button><button class="btn sec" data-session-cmd="attachTerminal">Attach</button><button class="btn sec" data-session-cmd="requestCheckpoint">Checkpoint</button><button class="btn sec" data-session-cmd="refreshSession">Refresh</button><button class="btn danger" data-session-cmd="terminateSession">Terminate</button></div></div><div class="stale">${esc(s.updated_at||"")}</div></div>`;',
+      'const timeline=(d.timeline||[]).slice(-5).reverse().map((e)=>`<div class="timeline-item"><span class="time">${esc(e.timestamp?e.timestamp.slice(11,16):"")}</span><span class="event">${esc(e.summary||e.type||"")}</span></div>`).join("")||`<div class="empty">No timeline events yet.</div>`;',
+      'const files=(d.changedFiles||[]).slice(0,8).map((f)=>`<div class="file"><div class="path">${esc(f.path)}</div><div class="delta"><span class="add">+${f.added}</span><span class="del">-${f.removed}</span></div></div>`).join("")||`<div class="empty">No changed files yet.</div>`;',
+      'const ev=d.evidence||{};',
+      'const evidence=[["Summary",ev.summary_exists?"present":"missing",ev.summary_exists?"ok":"warn"],["Pytest",ev.pytest_exists?"present":"missing",ev.pytest_exists?"ok":"warn"],["Screenshots",String((ev.screenshots||[]).length),(ev.screenshots||[]).length?"ok":"mut"],["Transcript",d.transcriptPreview&&d.transcriptPreview.length?"available":"empty",d.transcriptPreview&&d.transcriptPreview.length?"ok":"warn"]].map((r)=>`<div class="evidence-row"><div>${esc(r[0])}</div><div class="${r[2]}">${esc(r[1])}</div></div>`).join("");',
+      'const transcript=(d.transcriptPreview||[]).map((line)=>`<div class="transcript-line mono">${esc(line)}</div>`).join("")||`<div class="empty">No transcript output yet.</div>`;',
+      'byId("grid-top").innerHTML=`<div class="panel box"><h3>Timeline</h3>${timeline}<a class="link" href="#" data-session-cmd="viewTimeline">Open full timeline</a></div><div class="panel box"><h3>Changed Files</h3>${files}${d.diffAvailable?`<a class="link" href="#" data-session-cmd="viewDiff">View diff</a>`:""}</div><div class="panel box"><h3>Evidence</h3>${evidence}<a class="link" href="#" data-session-cmd="viewEvidence">Inspect evidence</a></div>`;',
+      'byId("grid-bottom").innerHTML=`<div class="panel box"><h3>Transcript (latest)</h3>${transcript}<a class="link" href="#" data-session-cmd="peek">Open full transcript</a></div><div class="panel box"><h3>Operator Notes</h3><div class="empty">Use checkpoint requests and session refresh to steer the worker. Notes are still local-terminal driven.</div></div>`;',
+      'Array.from(document.querySelectorAll("[data-session-cmd]")).forEach((el)=>el.addEventListener("click",(evt)=>{evt.preventDefault();send("sessionCommand",{command:el.getAttribute("data-session-cmd"),sessionId:s.session_id,taskId:s.task_id});}));}',
+      'function queueCard(item,kind){const attn=kind==="needs"?" attn":"";const repo=((item.repo||"").split("/").pop())||"";const title=item.title||item.task||item.session_id||"";const meta=kind==="review"?`${repo}#${item.id}`:repo;const chips=(kind==="review"?`${item.tier==="2"?chip("tier-2","t2"):""}${item.url?chip("pr"):""}`:`${item.lane?chip(item.lane):""}${item.state?chip(item.state,["needs_decision","error"].includes(item.state)?"danger":""):""}`);let actions="";if(kind==="review"){actions=`<div class="queue-actions"><button class="btn sec" data-open-url="${esc(item.url||"")}">Review PR</button></div>`;}else if(item.session_id){actions=`<div class="queue-actions"><button class="btn sec" data-select-session="${esc(item.session_id)}">Open session</button><button class="btn sec" data-session-action="peek" data-session-id="${esc(item.session_id)}" data-task-id="${esc(item.task||item.task_id||"")}">Peek</button></div>`;}return `<div class="panel queue-card${attn}"><div class="queue-title">${esc(title)}</div><div class="queue-meta"><span class="mut">${esc(meta)}</span>${chips}</div>${item.now?`<div class="sub">${esc(item.now)}</div>`:""}${actions}</div>`;}',
+      'function readyCard(item){return `<div class="panel mini-card"><div class="queue-title">${esc(item.title||"")}</div><div class="queue-meta"><span class="mut">${esc(((item.repo||"").split("/").pop())||"")}#${esc(item.id||"")}</span>${item.tier==="2"?chip("tier-2","t2"):""}${item.lane?chip(item.lane):chip("hold","warn")}</div><div class="queue-actions"><button class="btn sec" data-dispatch-id="${esc(item.id||"")}" data-repo="${esc(item.repo||"")}">Dispatch</button></div></div>`;}',
+      'function bindQueueActions(){Array.from(document.querySelectorAll("[data-select-session]")).forEach((el)=>el.addEventListener("click",()=>{state.selectedSessionId=el.getAttribute("data-select-session")||"";vscode.setState(state);send("selectSession",{sessionId:state.selectedSessionId});}));Array.from(document.querySelectorAll("[data-session-action]")).forEach((el)=>el.addEventListener("click",()=>send("sessionCommand",{command:el.getAttribute("data-session-action"),sessionId:el.getAttribute("data-session-id"),taskId:el.getAttribute("data-task-id")})));Array.from(document.querySelectorAll("[data-open-url]")).forEach((el)=>el.addEventListener("click",()=>send("openUrl",{url:el.getAttribute("data-open-url")})));Array.from(document.querySelectorAll("[data-dispatch-id]")).forEach((el)=>el.addEventListener("click",()=>send("dispatchId",{id:el.getAttribute("data-dispatch-id"),repo:el.getAttribute("data-repo")})));}',
+      'function renderQueues(){const b=state.board||{ready:[],active:[],review:[]};const needs=(b.active||[]).filter((r)=>r.state==="needs_decision");byId("needs-count").textContent=String(needs.length);byId("review-count").textContent=String((b.review||[]).length);byId("ready-count").textContent=String((b.ready||[]).length);byId("needs").innerHTML=needs.length?needs.map((r)=>queueCard(r,"needs")).join(""):`<div class="empty">Nothing waiting on an owner decision.</div>`;byId("review").innerHTML=(b.review||[]).length?(b.review||[]).map((r)=>queueCard(r,"review")).join(""):`<div class="empty">No PRs awaiting review.</div>`;byId("ready").innerHTML=(b.ready||[]).length?(b.ready||[]).map(readyCard).join(""):`<div class="empty">No fresh agent-ready issues.</div>`;bindQueueActions();}',
+      'function renderAll(){renderStats();ensureSelected();renderQueues();renderFocus();vscode.setState(state);}',
+      'window.addEventListener("message",(e)=>{if(!e.data)return;if(e.data.type==="board"){state.board=e.data.board||{ready:[],active:[],review:[]};renderAll();}if(e.data.type==="detail"){state.detail=e.data.detail||null;renderFocus();vscode.setState(state);}});',
+      'Array.from(document.querySelectorAll("[data-cmd]")).forEach((b)=>b.addEventListener("click",()=>send("command",{command:b.getAttribute("data-cmd")})));',
+      'renderAll();',
       '</script></body></html>',
     ].join('\n');
   }
