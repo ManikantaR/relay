@@ -46,11 +46,23 @@ def _mapped_state(task: str) -> str:
         "PROGRESS": "running" if active else "paused",
         "DONE": "done",
         "RATE_LIMITED": "rate_limited",
-        "ERROR": "error",
+        "ERROR": "error" if active else "needs_decision",
         "HELD": "held",
         "MISSING": "error",
     }
     return mapping.get(head, "running" if active else "paused")
+
+
+def _status_detail(task: str) -> str:
+    last = _status(task).strip()
+    if not last:
+        return "worker state unknown"
+    parts = last.split(None, 2)
+    if len(parts) >= 2 and parts[0] == "ERROR":
+        return parts[1]
+    if len(parts) >= 2 and parts[0] == "RATE_LIMITED":
+        return "worker hit provider quota/usage limit"
+    return last
 
 
 def ensure_session_for_task(task: str, store: Store | None = None) -> dict[str, Any]:
@@ -105,6 +117,8 @@ def sync_task(task: str, reason: str = "v1 sync", store: Store | None = None) ->
     store.update_session(sess["session_id"], mutate)
     current = store.get_session(sess["session_id"])
     if current["state"] != target:
+        if target == "needs_decision":
+            return mark_needs_decision(task, _status_detail(task), store=store)
         try:
             return store.transition_session(sess["session_id"], target, actor="relay-bridge", reason=reason)
         except ValueError:

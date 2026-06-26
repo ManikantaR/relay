@@ -15,8 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DATA = Path(os.getenv("DATA_DIR", "data"))
-RATE = re.compile(r"rate.?limit|usage limit|session limit|limit reached|quota|\b429\b|"
-                  r"too many requests|overloaded|resets \d", re.IGNORECASE)
+RATE = re.compile(r"rate.?limit|usage limit|usage credits|required|session limit|"
+                  r"limit reached|quota|\b429\b|too many requests|overloaded|resets \d",
+                  re.IGNORECASE)
 
 
 def classify(task: str, rc: str) -> str:

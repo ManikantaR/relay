@@ -146,6 +146,10 @@ def test_finish_rate_limited_from_log(tmp_path, monkeypatch):
     _fin(tmp_path, monkeypatch, "Error: usage limit reached, try again later\n")
     assert finish.classify("t1", "1") == "RATE_LIMITED"
 
+def test_finish_usage_credits_required_counts_as_rate_limited(tmp_path, monkeypatch):
+    _fin(tmp_path, monkeypatch, "Usage credits required for 1M context\n")
+    assert finish.classify("t1", "1") == "RATE_LIMITED"
+
 def test_finish_zero_beats_stale_ratelimit_text(tmp_path, monkeypatch):
     # a clean exit is DONE even if the log mentions limits earlier
     _fin(tmp_path, monkeypatch, "hit rate limit once, recovered\n")
@@ -517,6 +521,21 @@ def test_bridge_mark_needs_decision(tmp_path, monkeypatch):
     bridge.ensure_session_for_task("smartocrprocess-12", store=st)
     sess = bridge.mark_needs_decision("smartocrprocess-12", "worker errored", store=st)
     assert sess["state"] == "needs_decision"
+
+def test_bridge_sync_maps_inactive_error_to_needs_decision(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "2", "lane": "claude"
+    }))
+    (td / "status.md").write_text("ERROR exit=1 2026-06-26T00:00:00+00:00\n")
+    st = store.Store(tmp_path)
+    bridge.ensure_session_for_task("smartocrprocess-12", store=st)
+    st.update_session("task_smartocrprocess-12", lambda doc: doc.update({"state": "error"}))
+    sess = bridge.sync_task("smartocrprocess-12", store=st)
+    assert sess["state"] == "needs_decision"
+    assert any(e["type"] == "needs_decision" for e in st.timeline(sess["session_id"]))
 
 
 # ------------------------------------------------------- v2 CLI session inspection

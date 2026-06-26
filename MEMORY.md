@@ -16,6 +16,20 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Improved the runtime classification around the real smartocrprocess blocker. Relay now
+       treats provider messages like "usage credits required" as a quota/rate-cap signature in
+       the finisher, and the v1->v2 bridge now maps inactive `ERROR` tasks into
+       `needs_decision` instead of leaving them as dead generic `error` sessions. Revalidated:
+       64 pytest tests pass, and refreshing the real `task_smartocrprocess-12` session now
+       moves it into `needs_decision` with a bridge event instead of showing a bare error. The
+       board/dashboard feed now reflects that owner-facing state directly.
+Next:  The live smartocrprocess path is narrowed to repo state and provider state, not Relay
+       ambiguity. The next practical move is to either restore Claude credits for Tier-2 issue
+       `#12` and retry it, or create/release a fresh Tier-1 `agent-ready` issue so the full
+       dispatch/review loop can be exercised without the sacred-lane credit dependency.
+Blocked: no fresh `agent-ready` issues are currently dispatchable in smartocrprocess; issue `#12` is blocked by Claude usage credits and issue `#44` is already in PR review.
+
+## 2026-06-26 · personal · agent
 Did:   Cleared the packaged VS Code install path end to end. Installed `@vscode/vsce` as a
        local dev dependency in `vscode/`, fixed two real path bugs in `relay vscode-package`
        (local `vsce` path and VSIX output path under `cwd=vscode`), revalidated the suite
