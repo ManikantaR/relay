@@ -26,6 +26,8 @@ import relay_spawn as spawn
 import relay_lanes as lanes
 from relay_board import get_board
 import relay_daemon
+import relay_bridge
+from relay_store import Store
 
 
 def cmd_watch(_argv: list[str]) -> int:
@@ -36,6 +38,26 @@ def cmd_watch(_argv: list[str]) -> int:
 def cmd_daemon(_argv: list[str]) -> int:
     relay_daemon.serve()
     return 0
+
+
+def _v2_store() -> Store:
+    return Store(ctrl.CFG.data_dir)
+
+
+def _sync_v1_tasks_into_v2(store: Store) -> None:
+    dd = ctrl.CFG.data_dir
+    if not dd.exists():
+        return
+    for d in sorted(dd.iterdir()):
+        if not d.is_dir():
+            continue
+        if d.name in {"sessions", "queue", "cache"}:
+            continue
+        if (d / "meta.json").exists() or (d / "status.md").exists():
+            try:
+                relay_bridge.sync_task(d.name, reason="cli sync", store=store)
+            except Exception:
+                pass
 
 
 def cmd_pull(argv: list[str]) -> int:
@@ -89,6 +111,55 @@ def cmd_lanes(argv: list[str]) -> int:
     print(f"configured (RELAY_LANES): {', '.join(data['configured'])}")
     print(f"available (auth-checked): {', '.join(data['available']) or '(none)'}")
     print(f"strict (work governance): {data['strict']}")
+    return 0
+
+
+def cmd_sessions(argv: list[str]) -> int:
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    rows = st.list_sessions()
+    if "--json" in argv:
+        print(json.dumps(rows)); return 0
+    if not rows:
+        print("(no v2 sessions)"); return 0
+    for s in rows:
+        repo = (s.get("repo") or "").split("/")[-1] or "-"
+        print(f"{s['session_id']:28} {repo:16} {s['role']:11} {s['state']:17} {s['task_id']}")
+    return 0
+
+
+def cmd_session(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay session <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+        doc = st.get_session(sid)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps(doc)); return 0
+    print(json.dumps(doc, indent=2))
+    return 0
+
+
+def cmd_timeline(argv: list[str]) -> int:
+    if not argv:
+        print("usage: relay timeline <session-id> [--json]", file=sys.stderr); return 2
+    st = _v2_store()
+    _sync_v1_tasks_into_v2(st)
+    sid = argv[0]
+    try:
+        rows = st.timeline(sid)
+    except FileNotFoundError:
+        print(f"session {sid} not found", file=sys.stderr); return 1
+    if "--json" in argv:
+        print(json.dumps(rows)); return 0
+    if not rows:
+        print("(no timeline events)"); return 0
+    for e in rows:
+        print(f"{e['sequence']:>3} {e['timestamp']} {e['type']:24} {e['summary']}")
     return 0
 
 
@@ -282,6 +353,7 @@ def cmd_resume(_argv: list[str]) -> int:
 
 
 COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
+            "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,
             "status": cmd_status, "board": cmd_board, "peek": cmd_peek, "diff": cmd_diff,
             "note": cmd_note, "lanes": cmd_lanes,
             "kill": cmd_kill, "pause": cmd_pause, "resume": cmd_resume}

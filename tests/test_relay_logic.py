@@ -4,7 +4,9 @@ get the most coverage. Run: cd relay && python3 -m pytest -q
 """
 import importlib.util
 import json
+import io
 import sys
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 import pytest
@@ -467,3 +469,65 @@ def test_bridge_mark_needs_decision(tmp_path, monkeypatch):
     bridge.ensure_session_for_task("smartocrprocess-12", store=st)
     sess = bridge.mark_needs_decision("smartocrprocess-12", "worker errored", store=st)
     assert sess["state"] == "needs_decision"
+
+
+# ------------------------------------------------------- v2 CLI session inspection
+def test_cli_sessions_lists_bridged_sessions(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    td = tmp_path / "smartocrprocess-12"
+    td.mkdir()
+    (td / "meta.json").write_text(json.dumps({
+        "repo": "o/r", "project": "/proj", "tier": "1", "lane": "claude"
+    }))
+    (td / "status.md").write_text("PROGRESS 2026-06-26T00:00:00+00:00\n")
+    (td / "active").touch()
+    old = sys.stdout
+    buf = io.StringIO()
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+    try:
+        sys.stdout = buf
+        assert cli.cmd_sessions([]) == 0
+    finally:
+        sys.stdout = old
+    out = buf.getvalue()
+    assert "task_smartocrprocess-12" in out
+    assert "running" in out
+
+def test_cli_session_json_detail(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    created = st.create_session(sess)
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_session([created["session_id"], "--json"]) == 0
+    finally:
+        sys.stdout = old
+    data = json.loads(buf.getvalue())
+    assert data["session_id"] == created["session_id"]
+
+def test_cli_timeline_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    st = store.Store(tmp_path)
+    sess = schema.default_session("repo-12", "o/r", "/proj")
+    created = st.create_session(sess)
+    st.transition_session(created["session_id"], "running")
+    cli = _load("relay_cli")
+    monkeypatch.setattr(cli.ctrl.CFG, "data_dir", tmp_path)
+    old = sys.stdout
+    buf = io.StringIO()
+    try:
+        sys.stdout = buf
+        assert cli.cmd_timeline([created["session_id"], "--json"]) == 0
+    finally:
+        sys.stdout = old
+    rows = json.loads(buf.getvalue())
+    assert any(e["type"] == "state_changed" for e in rows)

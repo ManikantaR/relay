@@ -16,6 +16,20 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-26 · personal · agent
+Did:   Added read-only CLI inspection for the v2 session store: `relay sessions`,
+       `relay session <id>`, and `relay timeline <id>`. These commands are bridge-aware:
+       they first sync any current v1 task artifacts into the v2 store, then render session
+       list/detail/timeline output without changing the existing `status`/`board` surfaces.
+       Learned that dynamically loaded CLI tests need the imported `relay_control.CFG.data_dir`
+       patched inside the loaded module, not only in the outer test module, otherwise the CLI
+       points at the wrong store path. Full suite is green: 52 passed.
+Next:  Decide whether to make existing `status`/`board` session-aware or keep those as v1
+       views while the VS Code extension grows a parallel v2 session surface. The next clean
+       runtime step is probably exposing transcript/evidence/diff through session-centric CLI
+       and daemon endpoints.
+Blocked: none
+
+## 2026-06-26 · personal · agent
 Did:   Added the first v1->v2 bridge. New `relay_bridge.py` now mirrors existing task
        artifacts (`meta.json`, `status.md`, `active`, `brief.md`) into deterministic v2
        sessions, syncs watchdog state into the session store, and marks review-pending or
