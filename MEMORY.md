@@ -16,6 +16,22 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-27 · personal · agent
+Did:   Recovered smartocrprocess issue `#12` from a half-finished Tier-2 worker. Reviewed the
+       committed branch `relay/cc-smartocrprocess-12`, verified it locally with a real Python
+       3.11 backend env (`19 passed` across the targeted gdrive/approve/capture/upload/watcher/
+       alembic suite) and a successful Next.js production build, wrote the missing Relay
+       evidence bundle, opened PR `#46`, added issue label `agent-review`, and nudged the PR
+       branch with an empty commit (`a97864a`, `chore: trigger CI for PR 46`) because no CI run
+       appeared on PR open. GitHub now shows an Azure Pipelines check suite on the head SHA, but
+       it remained `queued` through repeated polls and never started.
+Next:  Re-check PR `#46` CI. If Azure finally starts and fails, inspect logs and patch the
+       branch. If it stays queued, treat that as external CI infrastructure state, not a code
+       failure. Tier-2 merge still requires the owner's line-by-line review after checks are
+       satisfied.
+Blocked: PR `#46` CI is currently stuck in Azure Pipelines `queued` state with no runnable
+       check output yet.
+
+## 2026-06-27 · personal · agent
 Did:   Fixed the model-config scope: model routing is an OPERATOR property, so it now lives in
        ONE global file (~/.config/relay/models.yml, overridable via RELAY_MODELS_FILE, XDG-aware)
        instead of a copy in every repo's .crew/. relay_models.resolve now layers env override >
