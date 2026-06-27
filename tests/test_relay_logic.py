@@ -1006,3 +1006,198 @@ def test_bridge_carries_real_model_id_from_meta(tmp_path, monkeypatch):
     assert sess["provider"] == "anthropic"
     assert sess["effort"] == "medium"
     assert sess["role"] == "implementer"
+
+
+# ------------------------------------------------------- verifier loop (§9, auto-wired review)
+verify = _load("relay_verify")
+
+
+def _wjson(d, **kw):
+    (d / "review.json").write_text(json.dumps(kw))
+
+
+def test_parse_review_normalizes_verdicts(tmp_path):
+    ev = tmp_path / "ev"; ev.mkdir()
+    _wjson(ev, verdict="LGTM", comments=[], summary="ok")
+    assert verify.parse_review(ev)[0] == "approved"
+    _wjson(ev, verdict="request_changes", comments=[{"path": "a.py", "line": 1, "message": "x"}])
+    v, c, _ = verify.parse_review(ev)
+    assert v == "changes_requested" and c[0]["path"] == "a.py"
+
+
+def test_parse_review_missing_or_bad_is_unknown(tmp_path):
+    ev = tmp_path / "ev"; ev.mkdir()
+    assert verify.parse_review(ev)[0] == "unknown"
+    (ev / "review.json").write_text("{not json")
+    assert verify.parse_review(ev)[0] == "unknown"
+
+
+def test_review_decision_table():
+    assert verify.review_decision("approved", 1, 3) == "finalize"
+    assert verify.review_decision("unknown", 1, 3) == "finalize"     # never block on a flaky reviewer
+    assert verify.review_decision("changes_requested", 1, 3) == "respawn"
+    assert verify.review_decision("changes_requested", 3, 3) == "needs_decision"
+
+
+def test_append_feedback_writes_section(tmp_path):
+    b = tmp_path / "brief.md"; b.write_text("# brief\n")
+    verify.append_feedback(b, 2, [{"path": "s.py", "line": 9, "message": "fix retry"}])
+    text = b.read_text()
+    assert "Review feedback — round 2" in text and "`s.py:9` fix retry" in text
+
+
+def test_decision_log_prefers_decisions_md(tmp_path):
+    ev = tmp_path / "ev"; ev.mkdir()
+    (ev / "decisions.md").write_text("Chose resumable upload; ruled out v3 chunked.")
+    assert "Decision log" in verify.decision_log(ev) and "resumable" in verify.decision_log(ev)
+
+
+def test_decision_log_falls_back_to_summary(tmp_path):
+    ev = tmp_path / "ev"; ev.mkdir()
+    (ev / "summary.md").write_text("Did the thing.\nRuled out the slow path.\nDone.")
+    out = verify.decision_log(ev)
+    assert "Decision log" in out and "Ruled out the slow path" in out
+
+
+def test_render_review_brief_is_read_only_and_asks_for_json():
+    b = verify.render_review_brief("T", "12", "2", "/ev", base="origin/main", round_no=1)
+    assert "read-only" in b and "review.json" in b and "Do NOT" in b
+
+
+# --- control-flow routing (mock the launches / board) -----------------------------------
+def _quiet(monkeypatch):
+    monkeypatch.setattr(ctrl, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(ctrl, "_notify_once", lambda *a, **k: None)
+    monkeypatch.setattr(ctrl, "memory_append", lambda *a, **k: None)
+
+
+def _task(tmp_path, monkeypatch, meta, evidence=None, status="DONE x\n"):
+    monkeypatch.setattr(ctrl.CFG, "data_dir", tmp_path)
+    td = tmp_path / "t1"
+    (td / "evidence" / "screenshots").mkdir(parents=True)
+    (td / "meta.json").write_text(json.dumps(meta))
+    (td / "status.md").write_text(status)
+    (td / "brief.md").write_text("# brief\n")
+    for name, content in (evidence or {}).items():
+        (td / "evidence" / name).write_text(content)
+    return td
+
+
+def test_close_out_implementer_routes_to_review(tmp_path, monkeypatch):
+    _quiet(monkeypatch)
+    _task(tmp_path, monkeypatch, {"phase": "implement", "worktree": ""})
+    monkeypatch.setenv("RELAY_REVIEW", "1")
+    monkeypatch.setattr(ctrl, "_collect_evidence", lambda t, w: None)
+    monkeypatch.setattr(ctrl, "evidence_ok", lambda t: (True, ["summary.md"]))
+    calls = []
+    monkeypatch.setattr(ctrl, "start_review", lambda t: calls.append("review"))
+    monkeypatch.setattr(ctrl, "finalize_pr", lambda t, review_note="": calls.append("finalize"))
+    ctrl.close_out("t1")
+    assert calls == ["review"]
+
+
+def test_close_out_finalizes_when_review_disabled(tmp_path, monkeypatch):
+    _quiet(monkeypatch)
+    _task(tmp_path, monkeypatch, {"phase": "implement", "worktree": ""})
+    monkeypatch.setenv("RELAY_REVIEW", "0")
+    monkeypatch.setattr(ctrl, "_collect_evidence", lambda t, w: None)
+    monkeypatch.setattr(ctrl, "evidence_ok", lambda t: (True, ["summary.md"]))
+    calls = []
+    monkeypatch.setattr(ctrl, "start_review", lambda t: calls.append("review"))
+    monkeypatch.setattr(ctrl, "finalize_pr", lambda t, review_note="": calls.append("finalize"))
+    ctrl.close_out("t1")
+    assert calls == ["finalize"]
+
+
+def test_close_out_reviewer_routes_to_advance(tmp_path, monkeypatch):
+    _quiet(monkeypatch)
+    _task(tmp_path, monkeypatch, {"phase": "review", "worktree": ""})
+    calls = []
+    monkeypatch.setattr(ctrl, "advance_review", lambda t: calls.append("advance"))
+    ctrl.close_out("t1")
+    assert calls == ["advance"]
+
+
+def test_advance_review_approved_finalizes_and_clears_phase(tmp_path, monkeypatch):
+    _quiet(monkeypatch)
+    td = _task(tmp_path, monkeypatch, {"phase": "review", "review_round": 1, "tier": "1",
+                                       "worktree": ""},
+               evidence={"summary.md": "ok"})
+    _wjson(td / "evidence", verdict="approved", comments=[], summary="great")
+    notes = []
+    monkeypatch.setattr(ctrl, "finalize_pr", lambda t, review_note="": notes.append(review_note))
+    ctrl.advance_review("t1")
+    assert notes and "approved" in notes[0]
+    assert json.loads((td / "meta.json").read_text())["phase"] == "implement"
+
+
+def test_advance_review_changes_respawns_implementer(tmp_path, monkeypatch):
+    import importlib
+    _quiet(monkeypatch)
+    td = _task(tmp_path, monkeypatch, {"phase": "review", "review_round": 1, "tier": "1",
+                                       "worktree": "", "max_review_rounds": 3})
+    _wjson(td / "evidence", verdict="changes_requested",
+           comments=[{"path": "s.py", "line": 4, "message": "add retry"}])
+    relaunched = []
+    monkeypatch.setattr(importlib.import_module("relay_spawn"), "relaunch",
+                        lambda task, brief, role="implementer", note="": relaunched.append((brief, role)))
+    monkeypatch.setattr(ctrl, "finalize_pr", lambda *a, **k: relaunched.append("FINALIZE"))
+    ctrl.advance_review("t1")
+    assert relaunched == [("brief.md", "implementer")]
+    assert "Review feedback" in (td / "brief.md").read_text()
+
+
+def test_advance_review_caps_to_needs_decision(tmp_path, monkeypatch):
+    import importlib
+    _quiet(monkeypatch)
+    td = _task(tmp_path, monkeypatch, {"phase": "review", "review_round": 3, "tier": "1",
+                                       "worktree": "", "max_review_rounds": 3})
+    _wjson(td / "evidence", verdict="changes_requested", comments=[])
+    seq = []
+    monkeypatch.setattr(ctrl, "finalize_pr", lambda t, review_note="": seq.append(("finalize", review_note)))
+    monkeypatch.setattr(importlib.import_module("relay_bridge"), "mark_needs_decision",
+                        lambda *a, **k: seq.append("needs_decision"))
+    ctrl.advance_review("t1")
+    assert seq[0][0] == "finalize" and "cap reached" in seq[0][1]
+    assert "needs_decision" in seq
+
+
+def test_start_review_writes_brief_and_relaunches_reviewer(tmp_path, monkeypatch):
+    import importlib
+    _quiet(monkeypatch)
+    td = _task(tmp_path, monkeypatch, {"phase": "implement", "review_round": 0, "tier": "2",
+                                       "title": "Drive", "item": "12", "worktree": ""})
+    launched = []
+    monkeypatch.setattr(importlib.import_module("relay_spawn"), "relaunch",
+                        lambda task, brief, role="implementer", note="": launched.append((brief, role)))
+    ctrl.start_review("t1")
+    meta = json.loads((td / "meta.json").read_text())
+    assert meta["phase"] == "review" and meta["review_round"] == 1
+    assert (td / "review-brief.md").exists()
+    assert launched == [("review-brief.md", "reviewer")]
+
+
+def test_finalize_pr_embeds_decision_log_and_review_note(tmp_path, monkeypatch):
+    import importlib
+    _quiet(monkeypatch)
+    td = _task(tmp_path, monkeypatch, {"phase": "implement", "tier": "1", "item": "12",
+                                       "branch": "relay/cc-t1", "repo": "o/r", "worktree": "/wt",
+                                       "lane": "claude", "title": "Drive"},
+               evidence={"summary.md": "did it", "decisions.md": "chose resumable upload"})
+
+    class _R:
+        returncode = 0; stderr = ""
+    monkeypatch.setattr(ctrl.subprocess, "run", lambda *a, **k: _R())
+
+    class _Board:
+        def __init__(self): self.body = None
+        def file_pr(self, branch, title, body, tier): self.body = body; return "99"
+        def apply_label(self, item, label): pass
+    board = _Board()
+    monkeypatch.setattr(importlib.import_module("relay_board"), "get_board", lambda repo=None: board)
+    monkeypatch.setattr(importlib.import_module("relay_bridge"), "mark_review_pending",
+                        lambda *a, **k: None)
+    ctrl.finalize_pr("t1", review_note="✅ reviewed by claude-opus-4-8 — approved")
+    assert "reviewed by claude-opus-4-8" in board.body
+    assert "Decision log" in board.body and "resumable upload" in board.body
+    assert "Closes #12" in board.body

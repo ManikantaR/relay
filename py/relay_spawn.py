@@ -131,23 +131,37 @@ def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
 
 
 def resume(task: str) -> None:
+    """Crash / rate-limit recovery. Phase-aware: a task mid-review relaunches the reviewer,
+    not the implementer, so failover/probe-resume during a review round does the right thing."""
+    meta = json.loads((DATA / task / "meta.json").read_text()) if (DATA / task / "meta.json").exists() else {}
+    if meta.get("phase") == "review":
+        relaunch(task, "review-brief.md", role="reviewer", note="(review resumed)")
+    else:
+        relaunch(task, "brief.md", role="implementer", note="(resumed)")
+
+
+def relaunch(task: str, brief_name: str = "brief.md", role: str = "implementer",
+             note: str = "") -> None:
+    """Relaunch a worker on an EXISTING worktree with a chosen brief + role. Re-resolves the
+    model for the role (so the reviewer gets Opus, the implementer Sonnet). Used for resume,
+    spawning the reviewer, and respawning the implementer with appended feedback."""
     taskdir = DATA / task
     meta = json.loads((taskdir / "meta.json").read_text()) if (taskdir / "meta.json").exists() else {}
     wt = Path(meta.get("worktree", str(DATA.parent / WORKTREES_NAME / task)))
-    (taskdir / "status.md").open("a").write(f"PROGRESS {_now()}  (resumed)\n")
+    lane = meta.get("lane", DEFAULT_LANE)
+    spec = models.resolve(lane, role=role, tier=str(meta.get("tier", "1")),
+                          project=meta.get("project"))
+    (taskdir / "status.md").open("a").write(f"PROGRESS {_now()}  {note}\n")
     (taskdir / "active").touch()
-    # reconstruct the pinned model spec from meta so a resume keeps the same model/effort.
-    spec = {"model_id": meta.get("model", ""), "effort": meta.get("effort", ""),
-            "max_budget_usd": meta.get("max_budget_usd")}
     _launch(task, wt, taskdir, meta.get("tier", "1"), meta.get("mode", _detect_mode()),
-            meta.get("lane", DEFAULT_LANE), spec)
+            lane, spec, brief_name=brief_name)
 
 
 def _launch(task: str, wt: Path, taskdir: Path, tier: str, mode: str, lane: str,
-            spec: dict | None = None) -> None:
+            spec: dict | None = None, brief_name: str = "brief.md") -> None:
     # ABSOLUTE paths: the worker runs in the worktree cwd, not the relay dir, so brief/log/
     # DATA_DIR must be absolute or `cat`/`tee`/the finisher resolve against the wrong directory.
-    brief = (taskdir / "brief.md").resolve()
+    brief = (taskdir / brief_name).resolve()
     log = (taskdir / "worker.log").resolve()
     data_abs = DATA.resolve()
     harness = _harness_cmd(lane, brief, mode, spec)

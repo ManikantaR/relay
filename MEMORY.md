@@ -16,6 +16,26 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-27 · personal · agent
+Did:   Auto-wired the verifier (review) loop — it now actually runs instead of being
+       simulated in the event log. New py/relay_verify.py holds the pure parts (reviewer
+       brief, verdict parsing, round/cap decision, feedback append, decision-log builder).
+       relay_spawn gained phase-aware relaunch() (resume now relaunches the reviewer when a
+       task is mid-review). relay_control.close_out routes by meta.phase: implementer DONE +
+       evidence ok -> start_review (spawns a read-only Opus reviewer in the same worktree,
+       writing evidence/review.json); reviewer DONE -> advance_review (parse verdict ->
+       approved=finalize, changes<cap=append feedback + respawn implementer, changes==cap=
+       file PR + needs_decision). finalize_pr embeds the decision log + a review note in the
+       PR body. Stray reviewer edits are discarded (git checkout/clean) so the implementer's
+       diff stays pristine. Gated by RELAY_REVIEW (default on; =0 reverts to direct PR). A
+       reviewer that errors files the PR unreviewed rather than stranding the work. +15 tests
+       (90 pass, compileall clean). NOT yet run live (needs a real dispatch the owner triggers
+       — the gateway breaks subprocess claude from the agent session).
+Next:  Live-test the loop on a fresh agent-ready issue; then build "backlog + dispatch from
+       the UI" (panel listing all open issues, one-click admit=label agent-ready+dispatch),
+       then move dispatch ownership into relayd off the v1 bridge.
+Blocked: none.
+
+## 2026-06-27 · personal · agent
 Did:   Implemented the lane-level Claude model policy (closes the prior "Next" / the
        token-burn pain point). New py/relay_models.py resolves provider/model/effort in the
        order env override > project .crew/models.yml (honored when PyYAML is importable) >

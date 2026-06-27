@@ -56,9 +56,16 @@ _FRAMES = {
     "lane-switch":       "🔀 failed over {detail} · {task}",
     "hung":              "🛑 STUCK — no progress, needs you · {task}\n{detail}",
     "crashed-respawned": "🔁 crashed → respawned from worktree · {task}",
+    "reviewing":         "🔎 reviewing ({detail}) · {task}",
+    "review-changes":    "🔁 changes requested → respawned · {task}\n{detail}",
     "merged":            "🎉 merged · {task}\n{detail}",
     "needs-decision":    "❓ blocked — your call · {task}\n{detail}",
 }
+
+
+def _review_enabled() -> bool:
+    """The verifier loop is on by default; RELAY_REVIEW=0 falls back to direct PR."""
+    return os.getenv("RELAY_REVIEW", "1") not in ("", "0", "false", "False")
 
 
 def notify(event: str, task: str, detail: str = "") -> None:
@@ -168,18 +175,32 @@ def _collect_evidence(task: str, worktree: str) -> None:
                 pass
 
 
-def close_out(task: str) -> None:
-    """Worker finished. Gate on evidence, then the TRUSTED plane pushes + files the PR.
-    The worker never pushed; this is where the leash becomes structural."""
-    from relay_board import get_board
-    import relay_bridge as bridge
-    taskdir = CFG.data_dir / task
-    meta = json.loads((taskdir / "meta.json").read_text()) if (taskdir / "meta.json").exists() else {}
-    tier, item, branch = meta.get("tier", "1"), meta.get("item", ""), meta.get("branch", "")
-    project, worktree = meta.get("project", "."), meta.get("worktree", "")
-    repo = meta.get("repo", "")
-    title = meta.get("title", "") or f"relay {task}"
+def _meta(task: str) -> dict:
+    p = CFG.data_dir / task / "meta.json"
+    return json.loads(p.read_text()) if p.exists() else {}
 
+
+def _write_meta(task: str, meta: dict) -> None:
+    (CFG.data_dir / task / "meta.json").write_text(json.dumps(meta))
+
+
+def _meta_phase_clear(task: str) -> None:
+    meta = _meta(task)
+    meta["phase"] = "implement"
+    _write_meta(task, meta)
+
+
+def close_out(task: str) -> None:
+    """A worker finished. Route by phase: a finished implementer goes through the evidence
+    gate and then into REVIEW (or straight to PR if review is off); a finished reviewer is
+    adjudicated. The worker never pushed — push/PR happen only in the trusted plane."""
+    import relay_bridge as bridge
+    meta = _meta(task)
+    if meta.get("phase") == "review":
+        advance_review(task)
+        return
+
+    worktree = meta.get("worktree", "")
     _collect_evidence(task, worktree)           # rescue evidence the agent misplaced
     ok, have = evidence_ok(task)
     if not ok:
@@ -193,7 +214,25 @@ def close_out(task: str) -> None:
         _clear_active(task)
         return
 
-    # trusted plane pushes the worker's local branch (worker holds no remote creds)
+    if _review_enabled():
+        start_review(task)                      # verify before the PR — don't finalize yet
+        return
+    finalize_pr(task)
+
+
+def finalize_pr(task: str, review_note: str = "") -> None:
+    """Trusted plane: push the worker's local branch, file the PR (with decision log +
+    review note), label it for the owner. This is the only place a PR is opened, and the
+    terminal step — the owner merges, never relay."""
+    from relay_board import get_board
+    import relay_bridge as bridge
+    import relay_verify as verify
+    taskdir = CFG.data_dir / task
+    meta = _meta(task)
+    tier, item, branch = meta.get("tier", "1"), meta.get("item", ""), meta.get("branch", "")
+    worktree, repo = meta.get("worktree", ""), meta.get("repo", "")
+    title = meta.get("title", "") or f"relay {task}"
+
     push = subprocess.run(["git", "-C", worktree, "push", "-u", "origin", branch],
                           capture_output=True, text=True)
     if push.returncode != 0:
@@ -204,6 +243,11 @@ def close_out(task: str) -> None:
 
     summary = (taskdir / "evidence" / "summary.md")
     body = (summary.read_text(encoding="utf-8") if summary.exists() else "")
+    if review_note:
+        body += f"\n\n{review_note}\n"
+    dlog = verify.decision_log(taskdir / "evidence")
+    if dlog:
+        body += f"\n\n{dlog}\n"
     body += f"\n\nCloses #{item}\n\n_Lane {meta.get('lane','?')} · evidence-gated by relay · human merges._\n"
     try:
         pr = get_board(repo).file_pr(branch, f"{title} (#{item})", body, tier)
@@ -219,10 +263,88 @@ def close_out(task: str) -> None:
         notify("tier2-held", task, f"PR {pr} — read every line at a desk, no rush")
     else:
         notify("tier1-ready", task, f"PR {pr} — skim when convenient")
-    memory_append(did=f"{task} done -> PR {pr} (tier-{tier}, lane {meta.get('lane','?')})",
+    memory_append(did=f"{task} done -> PR {pr} (tier-{tier}, lane {meta.get('lane','?')})"
+                      + (f" [{review_note}]" if review_note else ""),
                   nxt=("Owner: read every line, then merge." if tier == "2"
                        else "Owner: skim + merge."), author="agent")
     _clear_active(task)
+
+
+def _review_base(worktree: str) -> str:
+    """Base ref for the reviewer's diff — the remote default branch when resolvable."""
+    if not worktree:
+        return "main"
+    r = subprocess.run(["git", "-C", worktree, "symbolic-ref", "--quiet", "--short",
+                        "refs/remotes/origin/HEAD"], capture_output=True, text=True)
+    return f"origin/{r.stdout.strip().split('/')[-1]}" if r.returncode == 0 else "main"
+
+
+def start_review(task: str) -> None:
+    """Spawn a read-only reviewer (Opus) against the implementer's committed diff. Writes a
+    review brief, flips the task into the review phase, and relaunches the worker."""
+    import relay_spawn as spawn
+    import relay_verify as verify
+    taskdir = CFG.data_dir / task
+    meta = _meta(task)
+    rnd = int(meta.get("review_round", 0)) + 1
+    evidence = (taskdir / "evidence").resolve()
+    brief = verify.render_review_brief(meta.get("title", "") or task, meta.get("item", ""),
+                                       meta.get("tier", "1"), str(evidence),
+                                       base=_review_base(meta.get("worktree", "")), round_no=rnd)
+    (taskdir / "review-brief.md").write_text(brief, encoding="utf-8")
+    meta["phase"] = "review"
+    meta["review_round"] = rnd
+    _write_meta(task, meta)
+    spawn.relaunch(task, "review-brief.md", role="reviewer", note=f"(review round {rnd})")
+    notify("reviewing", task, f"round {rnd}")
+
+
+def advance_review(task: str) -> None:
+    """The reviewer finished. Discard any stray reviewer edits (keep the implementer's diff
+    pristine), read the verdict, and decide: finalize, respawn the implementer with feedback,
+    or — at the cap — file the PR and flag it for the owner."""
+    import relay_spawn as spawn
+    import relay_bridge as bridge
+    import relay_verify as verify
+    import relay_models as models
+    taskdir = CFG.data_dir / task
+    meta = _meta(task)
+    worktree = meta.get("worktree", "")
+    if worktree and Path(worktree).exists():
+        subprocess.run(["git", "-C", worktree, "checkout", "--", "."], capture_output=True)
+        subprocess.run(["git", "-C", worktree, "clean", "-fdq"], capture_output=True)
+
+    verdict, comments, _summary = verify.parse_review(taskdir / "evidence")
+    completed = int(meta.get("review_round", 1))
+    cap = int(meta.get("max_review_rounds", 3))
+    decision = verify.review_decision(verdict, completed, cap)
+    rmodel = models.resolve("claude", role="reviewer", tier=str(meta.get("tier", "1")),
+                            project=meta.get("project"))["model_id"]
+    meta["phase"] = "implement"                 # leave the review phase regardless
+    _write_meta(task, meta)
+
+    if decision == "respawn":
+        verify.append_feedback(taskdir / "brief.md", completed, comments)
+        spawn.relaunch(task, "brief.md", role="implementer",
+                       note=f"(addressing review round {completed})")
+        notify("review-changes", task, f"round {completed}: {len(comments)} comment(s)")
+        memory_append(did=f"{task} review round {completed}: changes requested -> respawned",
+                      nxt="Worker addressing reviewer feedback.", author="agent")
+        return
+
+    if decision == "needs_decision":
+        verify.append_feedback(taskdir / "brief.md", completed, comments)
+        finalize_pr(task, review_note=f"⚠️ review cap reached ({cap} rounds) — unresolved "
+                                      f"changes remain; your call.")
+        bridge.mark_needs_decision(task, f"review loop capped at {cap} rounds")
+        _notify_once("needs-decision", task, f"review capped at {cap} rounds — read the feedback")
+        return
+
+    # finalize: approved, or the reviewer produced no usable verdict (don't lose the work).
+    note = (f"✅ reviewed by {rmodel} — approved after {completed} round(s)."
+            if verdict == "approved"
+            else f"⚠️ reviewer returned no clear verdict; filing unreviewed after round {completed}.")
+    finalize_pr(task, review_note=note)
 
 
 # --- lane failover: pick the next available lane this task hasn't tried (AGENTS.md §12) ---
@@ -277,6 +399,10 @@ def supervise(task: str, probe, resume) -> None:
                 _notify_once("needs-decision", task, "probe hit a non-limit error"); return
             time.sleep(CFG.probe_interval)       # rc == 1: still limited
     if state is State.ERROR:
+        if _meta(task).get("phase") == "review":   # reviewer crashed — don't strand the work
+            _meta_phase_clear(task)
+            finalize_pr(task, review_note="⚠️ reviewer errored; filing unreviewed.")
+            return
         bridge.mark_needs_decision(task, line[len("ERROR"):].strip() or "worker errored")
         _notify_once("needs-decision", task, line[len("ERROR"):].strip() or "worker errored")
         _clear_active(task); return
@@ -385,6 +511,8 @@ Write to **{evidence}/**:
 - `summary.md` (required): what changed, why, and how each acceptance criterion is met.
 - `pytest.txt` (required if backend touched): captured `pytest -q` output.
 - `screenshots/*.png` (required if UI touched): Playwright shots of the feature working.
+- `decisions.md` (encouraged): the key decisions — what you tried, what you ruled out and
+  why — so the reviewer (and the owner) aren't reconstructing your reasoning cold.
 The control plane will not file a PR unless `summary.md` + (`pytest.txt` or a screenshot) exist.
 
 ## Done
