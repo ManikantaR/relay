@@ -23,6 +23,7 @@ def _load(name):
 
 
 spawn = _load("relay_spawn")
+models = _load("relay_models")
 ctrl = _load("relay_control")
 finish = _load("relay_finish")
 lanes = _load("relay_lanes")
@@ -912,3 +913,96 @@ def test_cli_session_reconcile_marks_done_tasks_reviewing(tmp_path, monkeypatch)
     assert ("remove", "44", "agent-ready") in actions
     assert ("remove", "44", "agent-wip") in actions
     assert ("add", "44", "agent-review") in actions
+
+
+# ------------------------------------------------------- model policy (token-burn fix, §11)
+def _clear_model_env(mp):
+    for k in ("RELAY_CLAUDE_MODEL", "RELAY_CLAUDE_EFFORT", "RELAY_MAX_BUDGET_USD", "RELAY_PROFILE"):
+        mp.delenv(k, raising=False)
+
+
+def test_resolve_implementer_defaults_to_sonnet(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("claude")
+    assert spec["model"] == "sonnet"
+    assert spec["model_id"] == "claude-sonnet-4-6"
+    assert spec["provider"] == "anthropic"
+    assert spec["effort"] == "medium"
+    assert spec["selection_mode"] == "auto"
+
+
+def test_resolve_reviewer_defaults_to_opus(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("claude", role="reviewer")
+    assert spec["model_id"] == "claude-opus-4-8"
+    assert spec["effort"] == "medium"
+
+
+def test_resolve_tier2_reviewer_uses_high_effort(monkeypatch):
+    _clear_model_env(monkeypatch)
+    assert models.resolve("claude", role="reviewer", tier="2")["effort"] == "high"
+    # tier-2 implementer stays on the cheap default
+    assert models.resolve("claude", role="implementer", tier="2")["model"] == "sonnet"
+
+
+def test_resolve_env_override_wins(monkeypatch):
+    _clear_model_env(monkeypatch)
+    monkeypatch.setenv("RELAY_CLAUDE_MODEL", "opus")
+    monkeypatch.setenv("RELAY_CLAUDE_EFFORT", "high")
+    spec = models.resolve("claude")
+    assert spec["model"] == "opus" and spec["effort"] == "high"
+    assert spec["selection_mode"] == "override"
+
+
+def test_resolve_noclaude_lane_injects_nothing(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("copilot")
+    assert spec["model"] == "" and spec["model_id"] == ""
+    assert spec["provider"] == "github-copilot"
+    assert models.claude_flags(spec) == ""
+
+
+def test_claude_harness_pins_model_and_effort(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("claude")
+    cmd = spawn._harness_cmd("claude", Path("/tmp/brief.md"), "tmux", spec)
+    assert "--model claude-sonnet-4-6" in cmd
+    assert "--effort medium" in cmd
+    assert "claude -p" in cmd
+
+
+def test_noclaude_harness_has_no_model_flag(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("copilot")
+    cmd = spawn._harness_cmd("copilot", Path("/tmp/brief.md"), "tmux", spec)
+    assert "--model" not in cmd
+    assert "copilot" in cmd
+
+
+def test_claude_flags_includes_budget_when_set(monkeypatch):
+    _clear_model_env(monkeypatch)
+    monkeypatch.setenv("RELAY_MAX_BUDGET_USD", "2.50")
+    flags = models.claude_flags(models.resolve("claude"))
+    assert "--max-budget-usd 2.5" in flags
+
+
+def test_bridge_carries_real_model_id_from_meta(tmp_path, monkeypatch):
+    # the token-burn fix must reach the v2 session: provider/model/effort come from meta,
+    # not the lane name. Without it the session recorded model="claude" (the lane).
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    task = "repo-12"
+    td = tmp_path / task
+    (td / "evidence").mkdir(parents=True)
+    (td / "meta.json").write_text(json.dumps({
+        "tier": "2", "lane": "claude", "role": "implementer", "repo": "o/r",
+        "project": "/proj", "worktree": "/wt", "provider": "anthropic",
+        "model": "claude-sonnet-4-6", "effort": "medium",
+        "selection_mode": "auto", "selection_reason": "default implementer",
+    }))
+    (td / "status.md").write_text("PROGRESS x\n")
+    st = store.Store(tmp_path)
+    sess = bridge.ensure_session_for_task(task, store=st)
+    assert sess["model"] == "claude-sonnet-4-6"
+    assert sess["provider"] == "anthropic"
+    assert sess["effort"] == "medium"
+    assert sess["role"] == "implementer"

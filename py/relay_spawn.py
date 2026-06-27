@@ -21,6 +21,8 @@ import json, os, platform, shlex, shutil, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+import relay_models as models
+
 DATA = Path(os.getenv("DATA_DIR", "data"))
 WORKTREES_NAME = os.getenv("RELAY_WORKTREES", ".worktrees")
 DEFAULT_LANE = os.getenv("RELAY_LANE", "claude")
@@ -35,16 +37,20 @@ def _now() -> str:
 
 
 
-def _harness_cmd(lane: str, brief: Path, mode: str) -> str:
+def _harness_cmd(lane: str, brief: Path, mode: str, spec: dict | None = None) -> str:
     """Non-interactive, run-to-completion launch string for a lane.
     The worker reads the brief file itself; it holds NO board credentials and is told
-    (in the brief) to commit only — the control plane pushes and files the PR."""
+    (in the brief) to commit only — the control plane pushes and files the PR.
+
+    `spec` is the resolved model policy (relay_models.resolve). For the claude lane it pins
+    `--model`/`--effort` so the worker never falls onto the credit-gated 1M-context default."""
+    flags = models.claude_flags(spec)              # "" for non-claude lanes
     if mode in ("wt-tab", "bg-job"):           # Windows work profile: claude only
-        return f'claude --permission-mode acceptEdits -p (Get-Content -Raw "{brief}")'
+        return f'claude --permission-mode acceptEdits{flags} -p (Get-Content -Raw "{brief}")'
     if lane == "claude":
         # script -qec gives claude a PTY so it STREAMS its output to the log (so the live
         # peek isn't blank); without it `claude -p` buffers until exit.
-        return f"script -qec 'claude -p \"$(cat {brief})\" --permission-mode acceptEdits' /dev/null"
+        return f"script -qec 'claude -p \"$(cat {brief})\" --permission-mode acceptEdits{flags}' /dev/null"
     if lane == "agy":                          # script -qec: keep agy output under a non-TTY
         return f"script -qec 'agy -p \"$(cat {brief})\"' /dev/null"
     if lane == "copilot":
@@ -88,7 +94,7 @@ def _base_ref(project: str, default: str = "main") -> str:
 
 def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
           lane: str, title: str = "", requested: str | None = None,
-          explicit: bool = False, repo: str = "") -> str:
+          explicit: bool = False, repo: str = "", role: str = "implementer") -> str:
     """Create the worktree + branch, record meta, launch the lane's harness."""
     taskdir = DATA / task
     taskdir.mkdir(parents=True, exist_ok=True)
@@ -107,15 +113,20 @@ def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
                     str(wt_abs), "-b", branch, base], capture_output=True)
 
     mode = _detect_mode()
+    spec = models.resolve(lane, role=role, tier=str(tier), project=str(proj))
     (taskdir / "meta.json").write_text(json.dumps({
         "item": item, "tier": tier, "lane": lane, "mode": mode, "repo": repo,
         "project": str(proj), "worktree": str(wt_abs), "branch": branch,
         "title": title, "requested": requested or lane, "explicit": explicit,
-        "tried_lanes": [lane],
+        "tried_lanes": [lane], "role": role,
+        # token-burn fix: carry the real model id (not the lane name) into the session.
+        "provider": spec["provider"], "model": spec["model_id"] or lane,
+        "effort": spec["effort"], "max_budget_usd": spec["max_budget_usd"],
+        "selection_mode": spec["selection_mode"], "selection_reason": spec["selection_reason"],
     }))
     (taskdir / "status.md").write_text(f"PROGRESS {_now()}\n")
     (taskdir / "active").touch()
-    _launch(task, wt_abs, taskdir, tier, mode, lane)
+    _launch(task, wt_abs, taskdir, tier, mode, lane, spec)
     return mode
 
 
@@ -125,17 +136,21 @@ def resume(task: str) -> None:
     wt = Path(meta.get("worktree", str(DATA.parent / WORKTREES_NAME / task)))
     (taskdir / "status.md").open("a").write(f"PROGRESS {_now()}  (resumed)\n")
     (taskdir / "active").touch()
+    # reconstruct the pinned model spec from meta so a resume keeps the same model/effort.
+    spec = {"model_id": meta.get("model", ""), "effort": meta.get("effort", ""),
+            "max_budget_usd": meta.get("max_budget_usd")}
     _launch(task, wt, taskdir, meta.get("tier", "1"), meta.get("mode", _detect_mode()),
-            meta.get("lane", DEFAULT_LANE))
+            meta.get("lane", DEFAULT_LANE), spec)
 
 
-def _launch(task: str, wt: Path, taskdir: Path, tier: str, mode: str, lane: str) -> None:
+def _launch(task: str, wt: Path, taskdir: Path, tier: str, mode: str, lane: str,
+            spec: dict | None = None) -> None:
     # ABSOLUTE paths: the worker runs in the worktree cwd, not the relay dir, so brief/log/
     # DATA_DIR must be absolute or `cat`/`tee`/the finisher resolve against the wrong directory.
     brief = (taskdir / "brief.md").resolve()
     log = (taskdir / "worker.log").resolve()
     data_abs = DATA.resolve()
-    harness = _harness_cmd(lane, brief, mode)
+    harness = _harness_cmd(lane, brief, mode, spec)
     color = "#D13438" if tier == "2" else "#0F7B0F"          # red Tier-2, green Tier-1
     # finisher classifies the exit (DONE/RATE_LIMITED/ERROR) — off the agent's goodwill.
     if mode == "wt-tab":

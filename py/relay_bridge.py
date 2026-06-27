@@ -76,14 +76,14 @@ def ensure_session_for_task(task: str, store: Store | None = None) -> dict[str, 
             task_id=task,
             repo=meta.get("repo", ""),
             project_path=meta.get("project", "."),
-            role="implementer",
+            role=meta.get("role", "implementer"),
             tier=str(meta.get("tier", "1")),
             lane=meta.get("lane", ""),
-            provider=meta.get("lane", ""),
-            model=meta.get("lane", ""),
-            effort="medium",
-            selection_mode="auto",
-            selection_reason="bridged from v1 runtime",
+            provider=meta.get("provider", meta.get("lane", "")),
+            model=meta.get("model", meta.get("lane", "")),
+            effort=meta.get("effort") or "medium",
+            selection_mode=meta.get("selection_mode", "auto"),
+            selection_reason=meta.get("selection_reason", "bridged from v1 runtime"),
             alternatives=[],
             max_review_rounds=3,
         )
@@ -110,8 +110,10 @@ def sync_task(task: str, reason: str = "v1 sync", store: Store | None = None) ->
         doc["project_path"] = meta.get("project", doc.get("project_path", "."))
         doc["tier"] = str(meta.get("tier", doc.get("tier", "1")))
         doc["lane"] = meta.get("lane", doc.get("lane", ""))
-        doc["provider"] = meta.get("lane", doc.get("provider", ""))
-        doc["model"] = meta.get("lane", doc.get("model", ""))
+        doc["provider"] = meta.get("provider", meta.get("lane", doc.get("provider", "")))
+        doc["model"] = meta.get("model", meta.get("lane", doc.get("model", "")))
+        if meta.get("effort"):
+            doc["effort"] = meta["effort"]
         doc["worktree_path"] = meta.get("worktree", doc.get("worktree_path", ""))
 
     store.update_session(sess["session_id"], mutate)

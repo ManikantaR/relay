@@ -15,6 +15,24 @@ Blocked: <anything waiting, or "none">
 
 ---
 
+## 2026-06-27 · personal · agent
+Did:   Implemented the lane-level Claude model policy (closes the prior "Next" / the
+       token-burn pain point). New py/relay_models.py resolves provider/model/effort in the
+       order env override > project .crew/models.yml (honored when PyYAML is importable) >
+       built-in defaults (implementer sonnet/medium, reviewer opus/medium, tier-2 reviewer
+       high). relay_spawn now launches `claude -p --model <id> --effort <level>
+       [--max-budget-usd N]`, so a worker never falls onto the credit-gated 1M-context
+       default that killed smartocrprocess-12. spawn records the real model id in meta;
+       relay_bridge carries it into the v2 session instead of the lane name. Added 9 tests
+       (75 pass, compileall clean). Also added .crew/models.yml to smartocrprocess as the
+       canonical policy. Note: when the `relay` launcher's system python3 lacks PyYAML, the
+       file is skipped and the (correct, cheap) defaults stand — a stdlib YAML reader or a
+       pinned interpreter would make models.yml always authoritative.
+Next:  Auto-wire the verifier loop (reviewer auto-spawn + implementer auto-respawn from the
+       brief + decision-log on the PR), then move dispatch ownership into relayd off the v1
+       bridge.
+Blocked: none.
+
 ## 2026-06-26 · personal · agent
 Did:   Investigated Claude credit burn in the live Relay setup. Verified locally that the
        generated worker brief is small (`data/smartocrprocess-12/brief.md` is 2.5 KB) and the
