@@ -11,6 +11,7 @@ data/*/meta.json
 data/*/brief.md
 data/*/job.id
 data/*/evidence/
+data/*/.notified-*
 data/.lanes.json
 data/sessions/
 data/queue/
