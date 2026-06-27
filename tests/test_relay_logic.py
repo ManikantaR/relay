@@ -919,6 +919,8 @@ def test_cli_session_reconcile_marks_done_tasks_reviewing(tmp_path, monkeypatch)
 def _clear_model_env(mp):
     for k in ("RELAY_CLAUDE_MODEL", "RELAY_CLAUDE_EFFORT", "RELAY_MAX_BUDGET_USD", "RELAY_PROFILE"):
         mp.delenv(k, raising=False)
+    # neutralize any real ~/.config/relay/models.yml so default tests are hermetic
+    mp.setenv("RELAY_MODELS_FILE", "/nonexistent/relay-models-test.yml")
 
 
 def test_resolve_implementer_defaults_to_sonnet(monkeypatch):
@@ -1201,3 +1203,48 @@ def test_finalize_pr_embeds_decision_log_and_review_note(tmp_path, monkeypatch):
     assert "reviewed by claude-opus-4-8" in board.body
     assert "Decision log" in board.body and "resumable upload" in board.body
     assert "Closes #12" in board.body
+
+
+def test_resolve_reads_global_policy_file(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    _clear_model_env(monkeypatch)
+    gf = tmp_path / "models.yml"
+    gf.write_text(
+        "models:\n"
+        "  defaults:\n"
+        "    reviewer:\n"
+        "      personal:\n"
+        "        preferred:\n"
+        "          - provider: anthropic\n"
+        "            model: sonnet\n"
+        "            effort: low\n")
+    monkeypatch.setenv("RELAY_MODELS_FILE", str(gf))
+    spec = models.resolve("claude", role="reviewer")     # default would be opus/medium
+    assert spec["model"] == "sonnet" and spec["effort"] == "low"
+    assert spec["selection_reason"].startswith("global policy")
+
+
+def test_repo_crew_overrides_global(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    _clear_model_env(monkeypatch)
+    gf = tmp_path / "global.yml"
+    gf.write_text(
+        "models:\n  defaults:\n    implementer:\n      personal:\n        preferred:\n"
+        "          - model: opus\n")
+    monkeypatch.setenv("RELAY_MODELS_FILE", str(gf))
+    proj = tmp_path / "proj"
+    (proj / ".crew").mkdir(parents=True)
+    (proj / ".crew" / "models.yml").write_text(
+        "models:\n  defaults:\n    implementer:\n      personal:\n        preferred:\n"
+        "          - model: haiku\n")
+    spec = models.resolve("claude", role="implementer", project=str(proj))
+    assert spec["model"] == "haiku"                       # repo override wins over global
+    assert spec["selection_reason"].startswith("repo policy")
+
+
+def test_global_policy_path_respects_env_and_xdg(tmp_path, monkeypatch):
+    monkeypatch.setenv("RELAY_MODELS_FILE", "/x/y.yml")
+    assert str(models._global_policy_path()) == "/x/y.yml"
+    monkeypatch.delenv("RELAY_MODELS_FILE", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert models._global_policy_path() == tmp_path / "relay" / "models.yml"

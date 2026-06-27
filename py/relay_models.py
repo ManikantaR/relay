@@ -9,13 +9,23 @@ launched with `--model`/`--effort` pinned.
 
 Resolution order (first wins):
   1. operator env override   (RELAY_CLAUDE_MODEL / RELAY_CLAUDE_EFFORT / RELAY_MAX_BUDGET_USD)
-  2. project policy file      (.crew/models.yml, honored only when PyYAML is importable)
-  3. built-in role defaults   (implementer = sonnet/medium, reviewer = opus/medium)
+  2. repo policy file         (<project>/.crew/models.yml — RARE override, only for a repo that
+                               genuinely wants different routing)
+  3. global policy file       ($RELAY_MODELS_FILE, else ~/.config/relay/models.yml) — the
+                               operator's default for every repo; the one place to tune policy
+                               and the only file the refresh skill maintains
+  4. built-in role defaults   (implementer = sonnet/medium, reviewer = opus/medium)
 
-Stdlib-only: if PyYAML is absent or the file is missing, the built-in defaults apply — the
-control plane keeps working with the right cheap default and takes no hard dependency. (When
-the daemon runs under an interpreter with PyYAML, .crew/models.yml is honored; the system
-`python3` the `relay` launcher picks may not have it, in which case defaults stand.)
+Model routing is an OPERATOR property, not a per-codebase one — so the default lives globally,
+not copied into every repo (that fan-out goes stale invisibly: a refresh can't touch a repo
+that isn't checked out). Per-repo `.crew/models.yml` stays supported as the occasional override,
+the way `.git/config` overrides the global git config.
+
+Stdlib-only: if PyYAML is absent or no policy file exists, the built-in defaults apply — and
+because the defaults use aliases (`sonnet`/`opus`), which the `claude` CLI resolves to the
+latest, they rarely go stale even across model launches. The control plane takes no hard
+dependency: the system `python3` the `relay` launcher picks may lack PyYAML, in which case the
+(correct, cheap) defaults stand.
 """
 from __future__ import annotations
 
@@ -50,12 +60,24 @@ def _canonical_id(model: str) -> str:
     return _ALIAS_ID.get(model, model)
 
 
-def _from_policy(role: str, tier: str, project: str | None) -> dict[str, Any] | None:
-    """Read .crew/models.yml if present and PyYAML is importable; else None (use defaults)."""
-    if not project:
-        return None
-    path = Path(project) / ".crew" / "models.yml"
-    if not path.exists():
+def _global_policy_path() -> Path:
+    """The operator's global policy: $RELAY_MODELS_FILE, else ~/.config/relay/models.yml
+    (honoring XDG_CONFIG_HOME). One file per machine — what the refresh skill maintains."""
+    override = os.getenv("RELAY_MODELS_FILE")
+    if override:
+        return Path(override).expanduser()
+    base = os.getenv("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return Path(base) / "relay" / "models.yml"
+
+
+def _repo_policy_path(project: str | None) -> Path | None:
+    return Path(project) / ".crew" / "models.yml" if project else None
+
+
+def _load_policy_file(path: Path | None, role: str, tier: str) -> dict[str, Any] | None:
+    """Read a models.yml at `path` -> {provider?, model?, effort?} for this role/tier; None if
+    the file is missing, PyYAML is unavailable, or it has nothing for this role."""
+    if not path or not path.exists():
         return None
     try:
         import yaml  # type: ignore
@@ -105,11 +127,16 @@ def resolve(lane: str, role: str = "implementer", tier: str = "1",
         base["effort"] = "high"
         reason = "tier-2 reviewer (high effort)"
 
-    pol = _from_policy(role, tier, project)
     mode = "auto"
-    if pol:
-        base.update({k: v for k, v in pol.items() if v})
-        mode, reason = "policy", f"policy .crew/models.yml ({role})"
+    # global operator policy first, then the rare per-repo override on top.
+    gpol = _load_policy_file(_global_policy_path(), role, tier)
+    if gpol:
+        base.update({k: v for k, v in gpol.items() if v})
+        mode, reason = "policy", f"global policy ({role})"
+    rpol = _load_policy_file(_repo_policy_path(project), role, tier)
+    if rpol:
+        base.update({k: v for k, v in rpol.items() if v})
+        mode, reason = "policy", f"repo policy ({role})"
 
     # Operator env override wins over file + defaults.
     if os.getenv("RELAY_CLAUDE_MODEL"):

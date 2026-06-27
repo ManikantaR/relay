@@ -16,6 +16,25 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-27 · personal · agent
+Did:   Fixed the model-config scope: model routing is an OPERATOR property, so it now lives in
+       ONE global file (~/.config/relay/models.yml, overridable via RELAY_MODELS_FILE, XDG-aware)
+       instead of a copy in every repo's .crew/. relay_models.resolve now layers env override >
+       repo .crew/models.yml (rare) > global file > built-in defaults; the global file uses
+       aliases (sonnet/opus) that the claude CLI auto-resolves, so it rarely goes stale.
+       Rationale: per-repo copies fan out and go stale invisibly — a refresh skill can't touch a
+       repo that isn't checked out (this was the user's objection). Removed the redundant
+       smartocrprocess .crew/models.yml (it now inherits the global default). Scaffolded the
+       `relay-models-refresh` global skill (installed to ~/.claude/skills, source versioned in
+       relay/skill/relay-models-refresh/): it reads authoritative model facts from the claude-api
+       skill, maintains the one global policy + a model-catalog.json (ids/pricing/context/effort
+       for cost display + a future UI dropdown), and never edits per-repo files. +3 tests (93
+       pass). Note: ~/.config/relay/ and ~/.claude/skills/ are machine-local — re-run the skill /
+       recreate the policy on the NAS and work laptop.
+Next:  Live-test the verifier loop; build "backlog + dispatch from the UI" (with a model-per-role
+       dropdown sourced from the catalog); then move dispatch ownership into relayd.
+Blocked: none.
+
+## 2026-06-27 · personal · agent
 Did:   Auto-wired the verifier (review) loop — it now actually runs instead of being
        simulated in the event log. New py/relay_verify.py holds the pure parts (reviewer
        brief, verdict parsing, round/cap decision, feedback append, decision-log builder).
