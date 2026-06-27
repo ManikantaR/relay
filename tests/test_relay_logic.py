@@ -1248,3 +1248,23 @@ def test_global_policy_path_respects_env_and_xdg(tmp_path, monkeypatch):
     monkeypatch.delenv("RELAY_MODELS_FILE", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert models._global_policy_path() == tmp_path / "relay" / "models.yml"
+
+
+# ------------------------------------------------------- per-issue effort (medium vs high)
+def test_effort_from_labels():
+    assert models.effort_from_labels(["tier-1", "effort:high", "lane:copilot"]) == "high"
+    assert models.effort_from_labels(["effort:bogus"]) is None
+    assert models.effort_from_labels(["tier-1"]) is None
+
+
+def test_resolve_effort_override_wins(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("claude", role="implementer", effort_override="high")
+    assert spec["effort"] == "high" and spec["selection_mode"] == "override"
+    assert "effort override" in spec["selection_reason"]
+
+
+def test_resolve_effort_override_ignores_bogus(monkeypatch):
+    _clear_model_env(monkeypatch)
+    spec = models.resolve("claude", role="implementer", effort_override="turbo")
+    assert spec["effort"] == "medium"        # default stands; bogus ignored

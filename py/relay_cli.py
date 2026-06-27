@@ -608,10 +608,11 @@ def _opt(argv: list[str], flag: str, default=None):
 def cmd_dispatch(argv: list[str]) -> int:
     if not argv:
         print("usage: relay dispatch <ticket-id> [--repo owner/name] [--project <path>] "
-              "[--lane claude|agy|copilot|codex]", file=sys.stderr)
+              "[--lane claude|agy|copilot|codex] [--effort low|medium|high|max]", file=sys.stderr)
         return 2
     ticket_id = argv[0]
     repo_opt, project_opt, lane = _opt(argv, "--repo"), _opt(argv, "--project"), _opt(argv, "--lane")
+    effort = _opt(argv, "--effort")
     # which (repo, project) to search: an explicit --repo, else the whole registry
     if repo_opt:
         reg = dict(ctrl.projects())
@@ -622,7 +623,8 @@ def cmd_dispatch(argv: list[str]) -> int:
         ticket = next((t for t in get_board(repo).pull_ready() if t.id == ticket_id), None)
         if ticket is None:
             continue
-        task = ctrl.dispatch_ticket(ticket, project_opt or project, repo, lane_override=lane)
+        task = ctrl.dispatch_ticket(ticket, project_opt or project, repo, lane_override=lane,
+                                    effort_override=effort)
         if task is None:
             print(f"{repo}#{ticket_id} HELD — no lane could be resolved (see `relay lanes`)",
                   file=sys.stderr)

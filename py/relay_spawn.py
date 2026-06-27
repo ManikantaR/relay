@@ -94,7 +94,8 @@ def _base_ref(project: str, default: str = "main") -> str:
 
 def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
           lane: str, title: str = "", requested: str | None = None,
-          explicit: bool = False, repo: str = "", role: str = "implementer") -> str:
+          explicit: bool = False, repo: str = "", role: str = "implementer",
+          effort_override: str | None = None) -> str:
     """Create the worktree + branch, record meta, launch the lane's harness."""
     taskdir = DATA / task
     taskdir.mkdir(parents=True, exist_ok=True)
@@ -113,12 +114,13 @@ def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
                     str(wt_abs), "-b", branch, base], capture_output=True)
 
     mode = _detect_mode()
-    spec = models.resolve(lane, role=role, tier=str(tier), project=str(proj))
+    spec = models.resolve(lane, role=role, tier=str(tier), project=str(proj),
+                          effort_override=effort_override)
     (taskdir / "meta.json").write_text(json.dumps({
         "item": item, "tier": tier, "lane": lane, "mode": mode, "repo": repo,
         "project": str(proj), "worktree": str(wt_abs), "branch": branch,
         "title": title, "requested": requested or lane, "explicit": explicit,
-        "tried_lanes": [lane], "role": role,
+        "tried_lanes": [lane], "role": role, "effort_override": effort_override,
         # token-burn fix: carry the real model id (not the lane name) into the session.
         "provider": spec["provider"], "model": spec["model_id"] or lane,
         "effort": spec["effort"], "max_budget_usd": spec["max_budget_usd"],
@@ -149,8 +151,10 @@ def relaunch(task: str, brief_name: str = "brief.md", role: str = "implementer",
     meta = json.loads((taskdir / "meta.json").read_text()) if (taskdir / "meta.json").exists() else {}
     wt = Path(meta.get("worktree", str(DATA.parent / WORKTREES_NAME / task)))
     lane = meta.get("lane", DEFAULT_LANE)
+    # the per-issue effort follows the implementer across respawns; the reviewer uses its own.
+    eo = meta.get("effort_override") if role == "implementer" else None
     spec = models.resolve(lane, role=role, tier=str(meta.get("tier", "1")),
-                          project=meta.get("project"))
+                          project=meta.get("project"), effort_override=eo)
     (taskdir / "status.md").open("a").write(f"PROGRESS {_now()}  {note}\n")
     (taskdir / "active").touch()
     _launch(task, wt, taskdir, meta.get("tier", "1"), meta.get("mode", _detect_mode()),

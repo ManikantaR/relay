@@ -522,12 +522,16 @@ Tests pass, evidence complete, work committed on your branch. End `summary.md` w
 
 
 def dispatch_ticket(ticket, project: str, repo: str = "",
-                    lane_override: str | None = None) -> str | None:
+                    lane_override: str | None = None,
+                    effort_override: str | None = None) -> str | None:
     import relay_spawn as spawn
     import relay_lanes as lanes
     import relay_bridge as bridge
+    import relay_models as models
     from relay_board import get_board
     task = task_id(repo, ticket.id)
+    # per-issue thinking level: explicit flag, else an `effort:<level>` label on the issue.
+    effort_override = effort_override or models.effort_from_labels(getattr(ticket, "labels", []))
 
     preferred, explicit = lanes.lane_preference(getattr(ticket, "labels", []), lane_override)
     lane, reason = lanes.resolve_lane(preferred, explicit, ticket.tier, lanes.available_lanes())
@@ -551,10 +555,12 @@ def dispatch_ticket(ticket, project: str, repo: str = "",
 
     get_board(repo).apply_label(ticket.id, "agent-wip")     # control-plane mutates the board
     mode = spawn.spawn(task, project, ticket.id, ticket.tier, str(brief), lane, ticket.title,
-                       requested=preferred, explicit=explicit, repo=repo)
+                       requested=preferred, explicit=explicit, repo=repo,
+                       effort_override=effort_override)
     bridge.sync_task(task, reason="dispatch")
     tag = "" if reason == "preferred" else f" [{reason}]"        # never silent: announce subs
-    notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}")
+    eff = f" · effort {effort_override}" if effort_override else ""
+    notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}{eff}")
     memory_append(did=f"Dispatched {task} ({ticket.title}) tier-{ticket.tier} lane={lane}{tag}",
                   nxt="Worker implementing; await evidence-gated PR."
                       + (" Tier-2 will HOLD." if ticket.tier == "2" else ""),

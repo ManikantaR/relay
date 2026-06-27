@@ -104,10 +104,25 @@ def _load_policy_file(path: Path | None, role: str, tier: str) -> dict[str, Any]
         return None
 
 
+_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
+
+
+def effort_from_labels(labels: list[str] | None) -> str | None:
+    """An `effort:<level>` label lets the owner dial thinking per-issue (medium vs high)."""
+    for lbl in labels or []:
+        if isinstance(lbl, str) and lbl.startswith("effort:"):
+            v = lbl.split(":", 1)[1].strip().lower()
+            if v in _EFFORT_LEVELS:
+                return v
+    return None
+
+
 def resolve(lane: str, role: str = "implementer", tier: str = "1",
-            project: str | None = None) -> dict[str, Any]:
+            project: str | None = None, effort_override: str | None = None) -> dict[str, Any]:
     """Return {provider, model, model_id, effort, max_budget_usd, selection_mode,
-    selection_reason} for a worker on `lane`. Only the claude lane carries a real model."""
+    selection_reason} for a worker on `lane`. Only the claude lane carries a real model.
+    `effort_override` (from an `effort:` label or `--effort` flag) is per-dispatch intent and
+    beats env/policy/defaults for the claude lane."""
     role = role if role in _ROLE_DEFAULT else "implementer"
 
     # Non-claude lanes manage their own model; record provenance, inject nothing.
@@ -145,6 +160,10 @@ def resolve(lane: str, role: str = "implementer", tier: str = "1",
     if os.getenv("RELAY_CLAUDE_EFFORT"):
         base["effort"] = os.environ["RELAY_CLAUDE_EFFORT"]
         mode = "override"
+    # per-dispatch effort (effort: label / --effort flag) is the most specific — it wins.
+    if effort_override and effort_override.lower() in _EFFORT_LEVELS:
+        base["effort"] = effort_override.lower()
+        mode, reason = "override", f"effort override ({effort_override.lower()})"
 
     budget = os.getenv("RELAY_MAX_BUDGET_USD")
     try:
