@@ -150,7 +150,13 @@ def relaunch(task: str, brief_name: str = "brief.md", role: str = "implementer",
     taskdir = DATA / task
     meta = json.loads((taskdir / "meta.json").read_text()) if (taskdir / "meta.json").exists() else {}
     wt = Path(meta.get("worktree", str(DATA.parent / WORKTREES_NAME / task)))
-    lane = meta.get("lane", DEFAULT_LANE)
+    # the reviewer runs on the claude lane (Opus) regardless of the implementer's lane — a
+    # copilot worker shouldn't be reviewed by copilot (correlated blind spots). The implementer
+    # keeps its own lane on respawn.
+    if role == "reviewer":
+        lane = os.getenv("RELAY_REVIEW_LANE", "claude")
+    else:
+        lane = meta.get("lane", DEFAULT_LANE)
     # the per-issue effort follows the implementer across respawns; the reviewer uses its own.
     eo = meta.get("effort_override") if role == "implementer" else None
     spec = models.resolve(lane, role=role, tier=str(meta.get("tier", "1")),

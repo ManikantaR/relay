@@ -1268,3 +1268,21 @@ def test_resolve_effort_override_ignores_bogus(monkeypatch):
     _clear_model_env(monkeypatch)
     spec = models.resolve("claude", role="implementer", effort_override="turbo")
     assert spec["effort"] == "medium"        # default stands; bogus ignored
+
+
+def test_relaunch_reviewer_uses_claude_lane(tmp_path, monkeypatch):
+    # the reviewer must run on claude (Opus), not the implementer's lane.
+    monkeypatch.setattr(spawn, "DATA", tmp_path)
+    monkeypatch.delenv("RELAY_REVIEW_LANE", raising=False)
+    td = tmp_path / "t1"; td.mkdir()
+    (td / "meta.json").write_text(json.dumps({"lane": "copilot", "tier": "1",
+                                              "worktree": str(tmp_path / "wt"), "project": "."}))
+    (td / "status.md").write_text("")
+    seen = {}
+    monkeypatch.setattr(spawn, "_launch",
+                        lambda task, wt, taskdir, tier, mode, lane, spec=None, brief_name="brief.md":
+                        seen.update(lane=lane, brief=brief_name))
+    spawn.relaunch("t1", "review-brief.md", role="reviewer")
+    assert seen["lane"] == "claude" and seen["brief"] == "review-brief.md"
+    spawn.relaunch("t1", "brief.md", role="implementer")
+    assert seen["lane"] == "copilot"
