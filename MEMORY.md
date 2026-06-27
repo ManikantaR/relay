@@ -16,6 +16,20 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-27 · personal · agent
+Did:   Closed the loop on smartocrprocess issue `#12` after PR `#46` was merged. Verified the
+       PR merge, closed GitHub issue `#12`, removed the stale `agent-review` label, appended
+       `DONE merged-pr=46 issue-closed` to `data/smartocrprocess-12/status.md`, and refreshed
+       the bridged v2 session so Relay now shows `task_smartocrprocess-12` as `done`.
+Next:  Continue with the remaining active smartocrprocess work and keep session/board truth in
+       sync after future owner merges.
+Blocked: none.
+
+## 2026-06-27 · personal · agent
+Did:     smartocrprocess-9 done -> PR 47 (tier-1, lane copilot)
+Next:    Owner: skim + merge.
+Blocked: none
+
+## 2026-06-27 · personal · agent
 Did:   Recovered smartocrprocess issue `#12` from a half-finished Tier-2 worker. Reviewed the
        committed branch `relay/cc-smartocrprocess-12`, verified it locally with a real Python
        3.11 backend env (`19 passed` across the targeted gdrive/approve/capture/upload/watcher/
