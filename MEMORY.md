@@ -16,6 +16,26 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-27 · personal · agent
+Did:   Set up dogfooding (Relay builds Relay) and the multi-repo/work strategy after a deep
+       research + grilling pass. Decisions: (1) the core loop is fixed and simple — multi-repo
+       and TFS only add a repo registry + board adapters, not new core complexity, so we are NOT
+       over-engineering as long as we hold three lines (two boards GitHub+TFS only; one item ->
+       one repo -> one PR, never cross-repo transactions; UI stays a dispatch/review console).
+       (2) Work = TFS work items + Azure Git repos + the owner's PowerShell scripts; Microsoft's
+       work-item->Copilot->PR is GitHub-repos-only, so Relay-at-work is differentiated: TFSBoard
+       wraps the existing PowerShell scripts and adds multi-lane + verifier + dashboard at scale.
+       (3) Dogfooding endorsed (Karpathy self-improvement loop; the Kitchen-Loop paper's self-
+       evolving orchestrator found exactly Relay's bug class — races, liveness, macOS timeouts);
+       the discipline (Monperrus bootstrap) is to review the SPEC/brief on tier-2, not just the
+       diff. Created Relay's `.crew/` (sacred set = relay_control/spawn/models/verify/lanes +
+       lib/policy.yml + AGENTS.md; protected test suite), the relay GitHub label set, ROADMAP.md,
+       and filed the roadmap as relay issues #1-#10 (dogfood-tagged, not yet agent-ready).
+Next:  Sequence agreed: prove the verifier loop live on smartocrprocess #32 FIRST (restart the
+       stale `relay watch`), then dogfood relay #1 (repo registry + `relay repo add`, tier-2),
+       then the rest. Owner to add RELAY_PROJECTS (smartocr + relay) to register relay locally.
+Blocked: none.
+
+## 2026-06-27 · personal · agent
 Did:   Closed the loop on smartocrprocess issue `#12` after PR `#46` was merged. Verified the
        PR merge, closed GitHub issue `#12`, removed the stale `agent-review` label, appended
        `DONE merged-pr=46 issue-closed` to `data/smartocrprocess-12/status.md`, and refreshed

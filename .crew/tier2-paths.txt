@@ -1,0 +1,12 @@
+# Relay's sacred paths — Tier-2: claude lane, Opus review, owner reads every line.
+# The orchestrator core + the un-weakenable safety policy + the spec. A bug here can mis-route
+# work, break the no-creds trust boundary, weaken the human-merge gate, or burn the budget.
+# (Dogfooding rule, per the bootstrap research: review the issue spec + brief here, not just
+# the diff — a spec error propagates to every generation.)
+py/relay_control.py
+py/relay_spawn.py
+py/relay_models.py
+py/relay_verify.py
+py/relay_lanes.py
+lib/policy.yml
+AGENTS.md

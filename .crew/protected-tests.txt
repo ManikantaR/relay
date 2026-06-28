@@ -1,0 +1,4 @@
+# Protected tests — a worker may NOT delete, skip, xfail, or weaken these to go green.
+# This is Relay's safety net for dogfooding: the loop can change Relay, but it cannot merge
+# while the suite is red, and it cannot make the suite green by removing coverage.
+tests/test_relay_logic.py
