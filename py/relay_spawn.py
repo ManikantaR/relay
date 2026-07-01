@@ -37,6 +37,17 @@ def _now() -> str:
 
 
 
+def _pty_wrap(cmd: str) -> str:
+    """Run `cmd` under a PTY so claude/agy STREAM their output to the tee'd log (without a TTY
+    they buffer until exit and the live peek is blank). GNU `script` (Linux/NAS) and BSD
+    `script` (macOS) take incompatible flags — GNU is `script -qec <cmd> <file>`, BSD is
+    `script -q <file> <command...>` with no `-c`/`-e` — so branch on platform. (BSD `script`
+    execs its command argv directly, so route through `bash -c` to keep `$(cat …)`.)"""
+    if platform.system() == "Darwin":
+        return f"script -q /dev/null bash -c {shlex.quote(cmd)}"
+    return f"script -qec {shlex.quote(cmd)} /dev/null"
+
+
 def _harness_cmd(lane: str, brief: Path, mode: str, spec: dict | None = None) -> str:
     """Non-interactive, run-to-completion launch string for a lane.
     The worker reads the brief file itself; it holds NO board credentials and is told
@@ -48,15 +59,16 @@ def _harness_cmd(lane: str, brief: Path, mode: str, spec: dict | None = None) ->
     if mode in ("wt-tab", "bg-job"):           # Windows work profile: claude only
         return f'claude --permission-mode acceptEdits{flags} -p (Get-Content -Raw "{brief}")'
     if lane == "claude":
-        # script -qec gives claude a PTY so it STREAMS its output to the log (so the live
-        # peek isn't blank); without it `claude -p` buffers until exit.
-        return f"script -qec 'claude -p \"$(cat {brief})\" --permission-mode acceptEdits{flags}' /dev/null"
-    if lane == "agy":                          # script -qec: keep agy output under a non-TTY
-        return f"script -qec 'agy -p \"$(cat {brief})\"' /dev/null"
+        return _pty_wrap(f'claude -p "$(cat {brief})" --permission-mode acceptEdits{flags}')
+    if lane == "agy":
+        return _pty_wrap(f'agy -p "$(cat {brief})"')
     if lane == "copilot":
         return f'copilot --allow-all-tools --autopilot -p "$(cat {brief})"'
     if lane == "codex":
-        return f'codex exec --sandbox workspace-write "$(cat {brief})"'
+        # `-c model=/-c model_reasoning_effort=` only when an impl:codex-<model> label pinned one;
+        # otherwise the bare form lets codex use its own ~/.codex/config.toml default.
+        cflags = models.codex_flags(spec)
+        return f'codex exec --sandbox workspace-write{cflags} "$(cat {brief})"'
     raise ValueError(f"unknown lane {lane}")
 
 
@@ -95,7 +107,7 @@ def _base_ref(project: str, default: str = "main") -> str:
 def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
           lane: str, title: str = "", requested: str | None = None,
           explicit: bool = False, repo: str = "", role: str = "implementer",
-          effort_override: str | None = None) -> str:
+          effort_override: str | None = None, model_override: str | None = None) -> str:
     """Create the worktree + branch, record meta, launch the lane's harness."""
     taskdir = DATA / task
     taskdir.mkdir(parents=True, exist_ok=True)
@@ -115,12 +127,13 @@ def spawn(task: str, project: str, item: str, tier: str, brief_path: str,
 
     mode = _detect_mode()
     spec = models.resolve(lane, role=role, tier=str(tier), project=str(proj),
-                          effort_override=effort_override)
+                          effort_override=effort_override, model_override=model_override)
     (taskdir / "meta.json").write_text(json.dumps({
         "item": item, "tier": tier, "lane": lane, "mode": mode, "repo": repo,
         "project": str(proj), "worktree": str(wt_abs), "branch": branch,
         "title": title, "requested": requested or lane, "explicit": explicit,
         "tried_lanes": [lane], "role": role, "effort_override": effort_override,
+        "impl_model": model_override,   # impl:<lane>-<model> pin — follows the implementer on respawn
         # token-burn fix: carry the real model id (not the lane name) into the session.
         "provider": spec["provider"], "model": spec["model_id"] or lane,
         "effort": spec["effort"], "max_budget_usd": spec["max_budget_usd"],
@@ -157,10 +170,14 @@ def relaunch(task: str, brief_name: str = "brief.md", role: str = "implementer",
         lane = os.getenv("RELAY_REVIEW_LANE", "claude")
     else:
         lane = meta.get("lane", DEFAULT_LANE)
-    # the per-issue effort follows the implementer across respawns; the reviewer uses its own.
-    eo = meta.get("effort_override") if role == "implementer" else None
+    # the per-issue effort follows the implementer across respawns; the reviewer takes its own
+    # model/effort from a `review:<model>` label (stored in meta at dispatch), else policy.
+    if role == "reviewer":
+        eo, mo = meta.get("review_effort"), meta.get("review_model")
+    else:
+        eo, mo = meta.get("effort_override"), meta.get("impl_model")
     spec = models.resolve(lane, role=role, tier=str(meta.get("tier", "1")),
-                          project=meta.get("project"), effort_override=eo)
+                          project=meta.get("project"), effort_override=eo, model_override=mo)
     (taskdir / "status.md").open("a").write(f"PROGRESS {_now()}  {note}\n")
     (taskdir / "active").touch()
     _launch(task, wt, taskdir, meta.get("tier", "1"), meta.get("mode", _detect_mode()),

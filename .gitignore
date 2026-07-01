@@ -9,15 +9,20 @@ data/*/worker.log
 data/*/status.md
 data/*/meta.json
 data/*/brief.md
+data/*/review-brief.md
 data/*/job.id
 data/*/evidence/
 data/*/.notified-*
 data/.lanes.json
+data/.paused
+data/watch.log
 data/sessions/
 data/queue/
 data/cache/
 data/relay.db
 .worktrees/
+# stray evidence a worker wrote at the repo root (belongs in data/<task>/evidence/)
+/evidence/
 # python
 __pycache__/
 *.pyc

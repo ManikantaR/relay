@@ -25,10 +25,16 @@ _CHANGES = {"changes_requested", "changes", "request_changes", "reject", "reject
 
 
 def render_review_brief(title: str, item: str, tier: str, evidence: str, base: str = "main",
-                        round_no: int = 1) -> str:
+                        round_no: int = 1, verdict_path: str | None = None) -> str:
     """The reviewer's brief. Read-only: it inspects the implementer's committed diff and the
-    evidence bundle and writes a structured verdict to evidence/review.json. It must NOT edit
-    code — any stray edits are discarded by the control plane before the next round."""
+    evidence bundle and writes a structured verdict. It must NOT edit code — any stray edits
+    are discarded by the control plane before the next round.
+
+    `evidence` is a directory the reviewer can READ (the control plane stages it inside the
+    worktree so it's within the reviewer's sandbox). `verdict_path` is the exact file the
+    reviewer must WRITE — also inside the worktree, because a reviewer sandboxed to the
+    worktree cannot write to relay's data dir. The control plane copies it back out."""
+    out = verdict_path or f"{evidence}/review.json"
     return f"""# Review: {title} (#{item}, tier-{tier}) — round {round_no}
 
 You are a **read-only reviewer**. Do NOT edit, create, or delete code. Do NOT commit, push,
@@ -45,7 +51,7 @@ Review for correctness, missing edge cases, security, and whether the evidence a
 backs the claims. Tier-2 paths deserve line-by-line scrutiny.
 
 ## Your only output — write exactly this file
-Write **{evidence}/review.json** (and nothing else) as:
+Write **{out}** (and nothing else) as:
 
 ```json
 {{
@@ -90,11 +96,19 @@ def parse_review(evidence_dir: Path) -> tuple[str, list[dict], str]:
 
 def review_decision(verdict: str, completed_rounds: int, cap: int = 3) -> str:
     """What to do after a reviewer run. completed_rounds counts the run that just finished.
-    Returns 'finalize' | 'respawn' | 'needs_decision'."""
+    Returns 'finalize' | 'respawn' | 're_review' | 'needs_decision'.
+
+    The review gate is only ever bypassed by an explicit human, NEVER by an infra/harness
+    failure: an 'unknown' verdict (no parseable review.json — a crashed or sandboxed-out
+    reviewer) re-runs the reviewer up to the cap and then escalates to needs_decision. It must
+    never finalize, or a broken harness would silently ship unreviewed code."""
+    if verdict == "approved":
+        return "finalize"
     if verdict == "changes_requested":
         return "needs_decision" if completed_rounds >= cap else "respawn"
-    # approved, or unknown (reviewer produced no usable verdict — don't block the work).
-    return "finalize"
+    # unknown: the reviewer produced no usable verdict. Retry it (transient harness/sandbox
+    # failures), then escalate — but do not finalize unreviewed.
+    return "needs_decision" if completed_rounds >= cap else "re_review"
 
 
 def append_feedback(brief_path: Path, round_no: int, comments: list[dict]) -> None:
