@@ -208,10 +208,29 @@ def _launch(task: str, wt: Path, taskdir: Path, tier: str, mode: str, lane: str,
         fin = f"DATA_DIR='{data_abs}' {PY} '{HERE / 'relay_finish.py'}' {task} $rc"
         cmd = f"( {harness} ) 2>&1 | tee '{log}'; rc=${{PIPESTATUS[0]}}; {fin}"
         subprocess.run(["tmux", "new-session", "-d", "-s", "relay"], capture_output=True)
-        subprocess.run(["tmux", "new-window", "-t", "relay", "-n", task, "-c", str(wt)])
+        # A finished worker leaves its window open; a phase handoff (implementer -> reviewer ->
+        # implementer) must NOT create a second window with the same name, or `send-keys` by
+        # name is ambiguous and the harness can land in the dead window (the reviewer silently
+        # never runs). Kill any prior window for this task, and target the new one by its unique
+        # window id, not its name.
+        _kill_task_windows(task)
+        new = subprocess.run(["tmux", "new-window", "-t", "relay", "-n", task, "-c", str(wt),
+                              "-P", "-F", "#{window_id}"], capture_output=True, text=True)
+        target = new.stdout.strip() or f"relay:{task}"
         # force bash: ${PIPESTATUS[0]} is bash 0-indexed; the user's tmux shell may be zsh
         # (1-indexed), which silently yields an empty exit code and breaks the finisher.
-        subprocess.run(["tmux", "send-keys", "-t", f"relay:{task}", "bash -c " + shlex.quote(cmd), "C-m"])
+        subprocess.run(["tmux", "send-keys", "-t", target, "bash -c " + shlex.quote(cmd), "C-m"])
+
+
+def _kill_task_windows(task: str) -> None:
+    """Kill any tmux windows named `task` — a finished/duplicate worker leaves its window open,
+    and two windows sharing a name make `send-keys -t relay:<task>` ambiguous."""
+    r = subprocess.run(["tmux", "list-windows", "-t", "relay", "-F", "#{window_id} #{window_name}"],
+                       capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        wid, _, name = line.partition(" ")
+        if name == task:
+            subprocess.run(["tmux", "kill-window", "-t", wid], capture_output=True)
 
 
 def probe() -> int:
