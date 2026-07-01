@@ -117,22 +117,76 @@ def effort_from_labels(labels: list[str] | None) -> str | None:
     return None
 
 
+_MODEL_ALIASES = {"opus", "sonnet", "haiku"}
+
+
+def review_model_from_labels(labels: list[str] | None) -> tuple[str | None, str | None]:
+    """A `review:<model>[-<effort>]` label picks the reviewer's model per issue — e.g.
+    `review:opus`, `review:sonnet`, `review:sonnet-medium`, `review:opus-high`. Returns
+    (model_alias, effort); either may be None. Mirrors the `effort:`/`lane:` label pattern."""
+    for lbl in labels or []:
+        if isinstance(lbl, str) and lbl.startswith("review:"):
+            parts = lbl.split(":", 1)[1].strip().lower().split("-")
+            model = parts[0] if parts and parts[0] in _MODEL_ALIASES else None
+            eff = next((p for p in parts[1:] if p in _EFFORT_LEVELS), None)
+            if model or eff:
+                return model, eff
+    return None, None
+
+
+# Lanes an `impl:` label may name — the claude lane plus every self-driving lane.
+_IMPL_LANES = set(_LANE_PROVIDER) | {"claude"}
+
+
+def _codex_model_id(suffix: str) -> str:
+    """Map an `impl:codex-<suffix>` suffix to a codex-cli model id: `5.4` -> `gpt-5.4`,
+    `5.4-mini` -> `gpt-5.4-mini`. Already-qualified ids (`gpt-…`) pass through unchanged."""
+    suffix = suffix.strip().lower()
+    return suffix if suffix.startswith("gpt-") else f"gpt-{suffix}"
+
+
+def impl_from_labels(labels: list[str] | None) -> tuple[str | None, str | None]:
+    """An `impl:<lane>-<model>` label pins the implementer's lane AND model per issue, mirroring
+    the `review:`/`effort:`/`lane:` labels — e.g. `impl:codex-5.4` -> ("codex", "gpt-5.4"),
+    `impl:codex-5.4-mini` -> ("codex", "gpt-5.4-mini"), `impl:claude-sonnet` -> ("claude",
+    "sonnet"). The model is a claude alias for the claude lane (resolve() canonicalizes it) or a
+    codex-cli id for the codex lane. Returns (lane, model); (None, None) if absent or malformed."""
+    for lbl in labels or []:
+        if isinstance(lbl, str) and lbl.startswith("impl:"):
+            lane, _, suffix = lbl.split(":", 1)[1].strip().lower().partition("-")
+            if lane not in _IMPL_LANES or not suffix:
+                continue
+            model = suffix if lane == "claude" else _codex_model_id(suffix)
+            return lane, model
+    return None, None
+
+
 def resolve(lane: str, role: str = "implementer", tier: str = "1",
-            project: str | None = None, effort_override: str | None = None) -> dict[str, Any]:
+            project: str | None = None, effort_override: str | None = None,
+            model_override: str | None = None) -> dict[str, Any]:
     """Return {provider, model, model_id, effort, max_budget_usd, selection_mode,
     selection_reason} for a worker on `lane`. Only the claude lane carries a real model.
-    `effort_override` (from an `effort:` label or `--effort` flag) is per-dispatch intent and
-    beats env/policy/defaults for the claude lane."""
+    `effort_override` (from an `effort:` label or `--effort` flag) and `model_override` (from a
+    `review:<model>` or `impl:<lane>-<model>` label) are per-dispatch intent and beat
+    env/policy/defaults. `model_override` also pins a self-driving lane's model (e.g. codex)."""
     role = role if role in _ROLE_DEFAULT else "implementer"
 
-    # Non-claude lanes manage their own model; record provenance, inject nothing.
+    # Self-driving lanes manage their own model; relay injects nothing UNLESS an
+    # `impl:<lane>-<model>` label pinned one (model_override) — then we hand that id to the lane's
+    # own harness (e.g. codex `-c model=`) and record the reasoning effort alongside it.
     if lane != "claude":
+        model_id = model_override or ""
+        eff = (effort_override.lower() if effort_override
+               and effort_override.lower() in _EFFORT_LEVELS else "")
+        if model_id and not eff:
+            eff = "medium"        # match codex's own default reasoning effort when we pin a model
         return {
             "provider": _LANE_PROVIDER.get(lane, lane),
-            "model": "", "model_id": "", "effort": "",
+            "model": model_id, "model_id": model_id, "effort": eff,
             "max_budget_usd": None,
-            "selection_mode": "lane",
-            "selection_reason": f"{lane} lane uses its own model",
+            "selection_mode": "override" if model_id else "lane",
+            "selection_reason": (f"impl model override ({lane} {model_id})" if model_id
+                                 else f"{lane} lane uses its own model"),
         }
 
     base = dict(_ROLE_DEFAULT[role])
@@ -164,6 +218,10 @@ def resolve(lane: str, role: str = "implementer", tier: str = "1",
     if effort_override and effort_override.lower() in _EFFORT_LEVELS:
         base["effort"] = effort_override.lower()
         mode, reason = "override", f"effort override ({effort_override.lower()})"
+    # per-issue reviewer model (review:<model> label) — explicit intent, beats env/policy.
+    if model_override:
+        base["model"] = model_override
+        mode, reason = "override", f"model override ({model_override})"
 
     budget = os.getenv("RELAY_MAX_BUDGET_USD")
     try:
@@ -194,4 +252,19 @@ def claude_flags(spec: dict[str, Any] | None) -> str:
         parts.append(f"--effort {spec['effort']}")
     if spec.get("max_budget_usd"):
         parts.append(f"--max-budget-usd {spec['max_budget_usd']}")
+    return " " + " ".join(parts)
+
+
+def codex_flags(spec: dict[str, Any] | None) -> str:
+    """Render `codex exec -c` overrides for a resolved spec; '' when no model is pinned (so codex
+    falls back to its own ~/.codex/config.toml default). Mirrors claude_flags for the codex lane —
+    only an `impl:codex-<model>` label makes resolve() set a model_id here."""
+    if not spec:
+        return ""
+    model = spec.get("model_id") or spec.get("model")
+    if not model:
+        return ""
+    parts = [f'-c model="{model}"']
+    if spec.get("effort"):
+        parts.append(f'-c model_reasoning_effort="{spec["effort"]}"')
     return " " + " ".join(parts)

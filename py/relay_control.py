@@ -284,16 +284,31 @@ def start_review(task: str) -> None:
     review brief, flips the task into the review phase, and relaunches the worker."""
     import relay_spawn as spawn
     import relay_verify as verify
+    import shutil
     taskdir = CFG.data_dir / task
     meta = _meta(task)
     rnd = int(meta.get("review_round", 0)) + 1
     evidence = (taskdir / "evidence").resolve()
+    # Stage the evidence bundle + verdict path INSIDE the worktree. A reviewer sandboxed to the
+    # worktree can't read/write relay's data dir, so it reads the staged copy and writes its
+    # verdict there; advance_review copies the verdict back out before it cleans the worktree.
+    read_dir, verdict_path = str(evidence), str(evidence / "review.json")
+    wt = Path(meta.get("worktree", ""))
+    if wt and wt.exists():
+        stage = wt / ".relay-review"
+        shutil.rmtree(stage, ignore_errors=True)
+        stage.mkdir(parents=True, exist_ok=True)
+        if evidence.exists():
+            shutil.copytree(evidence, stage / "evidence", dirs_exist_ok=True)
+        read_dir, verdict_path = str(stage / "evidence"), str(stage / "review.json")
     brief = verify.render_review_brief(meta.get("title", "") or task, meta.get("item", ""),
-                                       meta.get("tier", "1"), str(evidence),
-                                       base=_review_base(meta.get("worktree", "")), round_no=rnd)
+                                       meta.get("tier", "1"), read_dir,
+                                       base=_review_base(meta.get("worktree", "")), round_no=rnd,
+                                       verdict_path=verdict_path)
     (taskdir / "review-brief.md").write_text(brief, encoding="utf-8")
     meta["phase"] = "review"
     meta["review_round"] = rnd
+    meta["review_verdict_src"] = verdict_path        # advance_review reads the verdict back here
     _write_meta(task, meta)
     spawn.relaunch(task, "review-brief.md", role="reviewer", note=f"(review round {rnd})")
     notify("reviewing", task, f"round {rnd}")
@@ -307,9 +322,14 @@ def advance_review(task: str) -> None:
     import relay_bridge as bridge
     import relay_verify as verify
     import relay_models as models
+    import shutil
     taskdir = CFG.data_dir / task
     meta = _meta(task)
     worktree = meta.get("worktree", "")
+    # Rescue the reviewer's verdict from the worktree BEFORE discarding worktree changes.
+    src = meta.get("review_verdict_src", "")
+    if src and Path(src).exists():
+        shutil.copy(Path(src), taskdir / "evidence" / "review.json")
     if worktree and Path(worktree).exists():
         subprocess.run(["git", "-C", worktree, "checkout", "--", "."], capture_output=True)
         subprocess.run(["git", "-C", worktree, "clean", "-fdq"], capture_output=True)
@@ -319,7 +339,8 @@ def advance_review(task: str) -> None:
     cap = int(meta.get("max_review_rounds", 3))
     decision = verify.review_decision(verdict, completed, cap)
     rmodel = models.resolve("claude", role="reviewer", tier=str(meta.get("tier", "1")),
-                            project=meta.get("project"))["model_id"]
+                            project=meta.get("project"),
+                            model_override=meta.get("review_model"))["model_id"]
     meta["phase"] = "implement"                 # leave the review phase regardless
     _write_meta(task, meta)
 
@@ -332,19 +353,30 @@ def advance_review(task: str) -> None:
                       nxt="Worker addressing reviewer feedback.", author="agent")
         return
 
-    if decision == "needs_decision":
-        verify.append_feedback(taskdir / "brief.md", completed, comments)
-        finalize_pr(task, review_note=f"⚠️ review cap reached ({cap} rounds) — unresolved "
-                                      f"changes remain; your call.")
-        bridge.mark_needs_decision(task, f"review loop capped at {cap} rounds")
-        _notify_once("needs-decision", task, f"review capped at {cap} rounds — read the feedback")
+    if decision == "re_review":
+        # No parseable verdict — a crashed or sandboxed-out reviewer. Re-run it (bounded by the
+        # cap); never finalize unreviewed. start_review re-stages and bumps the round.
+        _notify_once(f"re-review-{completed}", task, f"reviewer produced no verdict — re-running (round {completed})")
+        start_review(task)
         return
 
-    # finalize: approved, or the reviewer produced no usable verdict (don't lose the work).
-    note = (f"✅ reviewed by {rmodel} — approved after {completed} round(s)."
-            if verdict == "approved"
-            else f"⚠️ reviewer returned no clear verdict; filing unreviewed after round {completed}.")
-    finalize_pr(task, review_note=note)
+    if decision == "needs_decision":
+        if verdict == "changes_requested":
+            # A real review that stayed unresolved at the cap: file the PR + flag for the owner.
+            verify.append_feedback(taskdir / "brief.md", completed, comments)
+            finalize_pr(task, review_note=f"⚠️ review cap reached ({cap} rounds) — unresolved "
+                                          f"changes remain; your call.")
+            bridge.mark_needs_decision(task, f"review loop capped at {cap} rounds")
+            _notify_once("needs-decision", task, f"review capped at {cap} rounds — read the feedback")
+        else:
+            # Reviewer never produced a verdict after `cap` attempts (infra/harness broken).
+            # Do NOT file the PR — the work is unreviewed and must not ship on an infra failure.
+            bridge.mark_needs_decision(task, f"reviewer produced no verdict after {cap} attempts — PR NOT filed (unreviewed)")
+            _notify_once("needs-decision", task, f"reviewer never returned a verdict ({cap}x) — PR not filed; investigate the reviewer lane")
+        return
+
+    # finalize: reachable only for an explicit `approved` verdict now.
+    finalize_pr(task, review_note=f"✅ reviewed by {rmodel} — approved after {completed} round(s).")
 
 
 # --- lane failover: pick the next available lane this task hasn't tried (AGENTS.md §12) ---
@@ -399,10 +431,11 @@ def supervise(task: str, probe, resume) -> None:
                 _notify_once("needs-decision", task, "probe hit a non-limit error"); return
             time.sleep(CFG.probe_interval)       # rc == 1: still limited
     if state is State.ERROR:
-        if _meta(task).get("phase") == "review":   # reviewer crashed — don't strand the work
-            _meta_phase_clear(task)
-            finalize_pr(task, review_note="⚠️ reviewer errored; filing unreviewed.")
-            return
+        if _meta(task).get("phase") == "review":   # reviewer crashed — NEVER ship unreviewed.
+            # Route through advance_review: with no parseable verdict it re-runs the reviewer
+            # (bounded by the round cap) and then escalates to needs_decision — a harness/infra
+            # failure must not bypass the human-review gate.
+            advance_review(task); return
         bridge.mark_needs_decision(task, line[len("ERROR"):].strip() or "worker errored")
         _notify_once("needs-decision", task, line[len("ERROR"):].strip() or "worker errored")
         _clear_active(task); return
@@ -533,7 +566,11 @@ def dispatch_ticket(ticket, project: str, repo: str = "",
     # per-issue thinking level: explicit flag, else an `effort:<level>` label on the issue.
     effort_override = effort_override or models.effort_from_labels(getattr(ticket, "labels", []))
 
-    preferred, explicit = lanes.lane_preference(getattr(ticket, "labels", []), lane_override)
+    # per-issue implementer lane+model: an `impl:<lane>-<model>` label names both. The lane feeds
+    # lane selection (explicit, like a `lane:` label); the model is pinned only if that lane wins.
+    impl_lane, impl_model = models.impl_from_labels(getattr(ticket, "labels", []))
+    preferred, explicit = lanes.lane_preference(getattr(ticket, "labels", []),
+                                                lane_override or impl_lane)
     lane, reason = lanes.resolve_lane(preferred, explicit, ticket.tier, lanes.available_lanes())
     if lane is None:
         # HOLD: work strict mismatch, or Tier-2 needs claude and claude is unavailable here.
@@ -554,13 +591,26 @@ def dispatch_ticket(ticket, project: str, repo: str = "",
         lane=lane, taskdir=taskdir.resolve(), evidence=evidence, tier2=tier2), encoding="utf-8")
 
     get_board(repo).apply_label(ticket.id, "agent-wip")     # control-plane mutates the board
+    # only pin the impl model if the resolved lane matches the labeled one — a failover
+    # substitution to a different lane drops the pin (a codex id is meaningless on, say, agy).
+    model_pin = impl_model if (impl_lane and lane == impl_lane) else None
     mode = spawn.spawn(task, project, ticket.id, ticket.tier, str(brief), lane, ticket.title,
                        requested=preferred, explicit=explicit, repo=repo,
-                       effort_override=effort_override)
+                       effort_override=effort_override, model_override=model_pin)
+    # per-issue reviewer model (review:<model> label) — stored for start_review / relaunch.
+    rmodel, reffort = models.review_model_from_labels(getattr(ticket, "labels", []))
+    if rmodel or reffort:
+        m = _meta(task)
+        if rmodel:
+            m["review_model"] = rmodel
+        if reffort:
+            m["review_effort"] = reffort
+        _write_meta(task, m)
     bridge.sync_task(task, reason="dispatch")
     tag = "" if reason == "preferred" else f" [{reason}]"        # never silent: announce subs
     eff = f" · effort {effort_override}" if effort_override else ""
-    notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}{eff}")
+    mdl = f" · model {model_pin}" if model_pin else ""
+    notify("started", task, f"tier-{ticket.tier} · lane {lane} · {mode}{tag}{eff}{mdl}")
     memory_append(did=f"Dispatched {task} ({ticket.title}) tier-{ticket.tier} lane={lane}{tag}",
                   nxt="Worker implementing; await evidence-gated PR."
                       + (" Tier-2 will HOLD." if ticket.tier == "2" else ""),
