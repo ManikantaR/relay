@@ -16,6 +16,16 @@ Blocked: <anything waiting, or "none">
 ---
 
 ## 2026-06-27 · personal · agent
+Did:   Updated the global Codex config at `~/.codex/config.toml` so the TUI status line now
+       shows `model-with-reasoning`, `usage-limit`, `secondary-usage-limit`, `current-dir`,
+       and `git-branch`. I checked the shipped Codex binary and confirmed the usage-limit
+       fields are built-in status-line items, so no custom hook or skill was needed.
+Next:  Visually confirm the new status line in an actual Codex session, then decide whether
+       the terminal title should also carry usage info or whether the status line alone is
+       enough.
+Blocked: none.
+
+## 2026-06-27 · personal · agent
 Did:   Set up dogfooding (Relay builds Relay) and the multi-repo/work strategy after a deep
        research + grilling pass. Decisions: (1) the core loop is fixed and simple — multi-repo
        and TFS only add a repo registry + board adapters, not new core complexity, so we are NOT

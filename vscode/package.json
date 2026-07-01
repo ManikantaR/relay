@@ -49,6 +49,11 @@
         "icon": "$(dashboard)"
       },
       {
+        "command": "relay.selectRepo",
+        "title": "Relay: Select Repo",
+        "icon": "$(repo)"
+      },
+      {
         "command": "relay.pull",
         "title": "Relay: Pull & Dispatch…",
         "icon": "$(cloud-download)"
@@ -119,6 +124,11 @@
           "command": "relay.openDashboard",
           "when": "view == relayWorkers",
           "group": "navigation@1"
+        },
+        {
+          "command": "relay.selectRepo",
+          "when": "view == relayWorkers",
+          "group": "navigation@1.5"
         },
         {
           "command": "relay.pull",

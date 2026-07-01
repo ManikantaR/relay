@@ -212,14 +212,16 @@ def test_task_id_is_repo_qualified_no_collision():
     assert ctrl.task_id("Org/MoneyPulse", 12) == "moneypulse-12"
     assert ctrl.task_id("a/x", 12) != ctrl.task_id("a/y", 12)
 
-def test_projects_parses_registry(monkeypatch):
+def test_projects_parses_registry(tmp_path, monkeypatch):
+    monkeypatch.setenv("RELAY_REPOS_FILE", str(tmp_path / "none.json"))   # no file -> env fallback
     monkeypatch.setenv("RELAY_PROJECTS", "a/b=/p1, c/d=/p2")
     assert ctrl.projects() == [("a/b", "/p1"), ("c/d", "/p2")]
 
-def test_projects_falls_back_to_single_repo(monkeypatch):
+def test_projects_falls_back_to_single_repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("RELAY_REPOS_FILE", str(tmp_path / "none.json"))   # no file -> env fallback
     monkeypatch.delenv("RELAY_PROJECTS", raising=False)
     monkeypatch.setenv("GITHUB_REPO", "x/y")
-    monkeypatch.setattr(ctrl.CFG, "project", "/proj")
+    monkeypatch.setenv("RELAY_PROJECT", "/proj")
     assert ctrl.projects() == [("x/y", "/proj")]
 
 def test_get_board_uses_passed_repo(monkeypatch):
@@ -1036,9 +1038,79 @@ def test_parse_review_missing_or_bad_is_unknown(tmp_path):
 
 def test_review_decision_table():
     assert verify.review_decision("approved", 1, 3) == "finalize"
-    assert verify.review_decision("unknown", 1, 3) == "finalize"     # never block on a flaky reviewer
     assert verify.review_decision("changes_requested", 1, 3) == "respawn"
     assert verify.review_decision("changes_requested", 3, 3) == "needs_decision"
+    # An 'unknown' verdict (crashed / sandboxed-out reviewer) must NEVER finalize unreviewed:
+    # re-run the reviewer up to the cap, then escalate — an infra failure can't bypass the gate.
+    assert verify.review_decision("unknown", 1, 3) == "re_review"
+    assert verify.review_decision("unknown", 2, 3) == "re_review"
+    assert verify.review_decision("unknown", 3, 3) == "needs_decision"
+    assert verify.review_decision("unknown", 1, 3) != "finalize"
+
+
+def test_review_model_from_labels():
+    from relay_models import review_model_from_labels
+    assert review_model_from_labels(["review:opus"]) == ("opus", None)
+    assert review_model_from_labels(["review:sonnet-medium"]) == ("sonnet", "medium")
+    assert review_model_from_labels(["review:opus-high"]) == ("opus", "high")
+    assert review_model_from_labels(["lane:codex", "effort:high"]) == (None, None)
+    assert review_model_from_labels([]) == (None, None)
+
+
+def test_resolve_review_model_override(monkeypatch):
+    _clear_model_env(monkeypatch)
+    # a review:<model> label overrides the reviewer's default model for the claude lane.
+    spec = models.resolve("claude", role="reviewer", model_override="sonnet")
+    assert "sonnet" in (spec["model_id"] or spec["model"])
+    assert spec["selection_mode"] == "override"
+
+
+def test_impl_from_labels():
+    from relay_models import impl_from_labels
+    assert impl_from_labels(["impl:codex-5.4"]) == ("codex", "gpt-5.4")
+    assert impl_from_labels(["impl:codex-5.4-mini"]) == ("codex", "gpt-5.4-mini")
+    assert impl_from_labels(["impl:claude-sonnet"]) == ("claude", "sonnet")
+    # already-qualified codex ids pass through; unrelated / malformed labels are ignored.
+    assert impl_from_labels(["impl:codex-gpt-5.4"]) == ("codex", "gpt-5.4")
+    assert impl_from_labels(["lane:codex", "effort:high"]) == (None, None)
+    assert impl_from_labels(["impl:bogus-x"]) == (None, None)
+    assert impl_from_labels([]) == (None, None)
+
+
+def test_impl_codex_harness_pins_model_and_effort(monkeypatch):
+    _clear_model_env(monkeypatch)
+    # impl:codex-5.4 -> the codex harness carries `-c model="gpt-5.4"` (+ default effort).
+    spec = models.resolve("codex", model_override="gpt-5.4")
+    cmd = spawn._harness_cmd("codex", Path("/tmp/brief.md"), "tmux", spec)
+    assert '-c model="gpt-5.4"' in cmd
+    assert '-c model_reasoning_effort="medium"' in cmd
+    assert 'codex exec --sandbox workspace-write' in cmd
+
+
+def test_impl_claude_harness_pins_model(monkeypatch):
+    _clear_model_env(monkeypatch)
+    # impl:claude-sonnet -> the claude harness carries `--model claude-sonnet-4-6`.
+    spec = models.resolve("claude", model_override="sonnet")
+    cmd = spawn._harness_cmd("claude", Path("/tmp/brief.md"), "tmux", spec)
+    assert "--model claude-sonnet-4-6" in cmd
+    assert spec["selection_mode"] == "override"
+
+
+def test_no_impl_label_leaves_codex_harness_bare(monkeypatch):
+    _clear_model_env(monkeypatch)
+    # no impl label: codex keeps its own config default — the bare launch form is unchanged.
+    spec = models.resolve("codex")
+    cmd = spawn._harness_cmd("codex", Path("/tmp/brief.md"), "tmux", spec)
+    assert cmd == 'codex exec --sandbox workspace-write "$(cat /tmp/brief.md)"'
+    assert models.codex_flags(spec) == ""
+
+
+def test_render_review_brief_writes_verdict_into_worktree():
+    # the reviewer must be told to WRITE inside its sandbox (worktree), not relay's data dir.
+    brief = verify.render_review_brief("T", "1", "1", "/wt/.relay-review/evidence",
+                                       verdict_path="/wt/.relay-review/review.json")
+    assert "/wt/.relay-review/review.json" in brief
+    assert "read-only reviewer" in brief.lower()
 
 
 def test_append_feedback_writes_section(tmp_path):
@@ -1286,3 +1358,69 @@ def test_relaunch_reviewer_uses_claude_lane(tmp_path, monkeypatch):
     assert seen["lane"] == "claude" and seen["brief"] == "review-brief.md"
     spawn.relaunch("t1", "brief.md", role="implementer")
     assert seen["lane"] == "copilot"
+
+
+# ------------------------------------------------------- repo registry (relay_repos + projects)
+repos = _load("relay_repos")
+
+
+def _fresh_registry(tmp_path, monkeypatch, name="repos.json"):
+    """Point the registry at a temp file and clear the env fallbacks."""
+    p = tmp_path / name
+    monkeypatch.setenv("RELAY_REPOS_FILE", str(p))
+    monkeypatch.delenv("RELAY_PROJECTS", raising=False)
+    monkeypatch.delenv("GITHUB_REPO", raising=False)
+    monkeypatch.delenv("RELAY_PROJECT", raising=False)
+    return p
+
+
+def test_registry_add_two_then_projects(tmp_path, monkeypatch):
+    p = _fresh_registry(tmp_path, monkeypatch)
+    repos.add("owner/one", "/repo/one")
+    repos.add("owner/two", "/repo/two")
+    assert p.exists()                                  # a real file, not just env
+    assert repos.projects() == [("owner/one", "/repo/one"), ("owner/two", "/repo/two")]
+
+
+def test_registry_rm(tmp_path, monkeypatch):
+    _fresh_registry(tmp_path, monkeypatch)
+    repos.add("owner/one", "/repo/one")
+    repos.add("owner/two", "/repo/two")
+    repos.remove("owner/one")
+    assert repos.projects() == [("owner/two", "/repo/two")]
+
+
+def test_registry_survives_reload(tmp_path, monkeypatch):
+    """The registry is a file, so a fresh process (new load()) still sees it."""
+    _fresh_registry(tmp_path, monkeypatch)
+    repos.add("owner/keep", "/repo/keep")
+    assert [e["name"] for e in repos.load()] == ["owner/keep"]
+
+
+def test_registry_add_is_idempotent_upsert(tmp_path, monkeypatch):
+    _fresh_registry(tmp_path, monkeypatch)
+    repos.add("owner/one", "/old/path")
+    repos.add("Owner/One", "/new/path")               # same repo, case-insensitive -> update
+    assert repos.projects() == [("Owner/One", "/new/path")]
+
+
+def test_registry_seeds_from_relay_projects_env(tmp_path, monkeypatch):
+    p = _fresh_registry(tmp_path, monkeypatch)
+    monkeypatch.setenv("RELAY_PROJECTS", "owner/a=/a,owner/b=/b")
+    assert not p.exists()
+    seeded = repos.seed_from_env()                     # materialize env -> file
+    assert p.exists()
+    assert [e["name"] for e in seeded] == ["owner/a", "owner/b"]
+
+
+def test_registry_falls_back_to_github_repo(tmp_path, monkeypatch):
+    _fresh_registry(tmp_path, monkeypatch)
+    monkeypatch.setenv("GITHUB_REPO", "owner/solo")
+    monkeypatch.setenv("RELAY_PROJECT", "/solo/path")
+    assert repos.projects() == [("owner/solo", "/solo/path")]
+
+
+def test_projects_via_relay_control_uses_registry(tmp_path, monkeypatch):
+    _fresh_registry(tmp_path, monkeypatch)
+    repos.add("owner/ctrl", "/ctrl")
+    assert ctrl.projects() == [("owner/ctrl", "/ctrl")]

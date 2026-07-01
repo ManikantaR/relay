@@ -62,10 +62,19 @@ def _sync_v1_tasks_into_v2(store: Store) -> None:
                 pass
 
 
+def _scoped_projects(argv: list[str]) -> list[tuple[str, str]]:
+    """The registry, optionally narrowed to a single `--repo owner/name` (the UI's active repo)."""
+    only = _opt(argv, "--repo")
+    projs = ctrl.projects()
+    if only:
+        return [(r, p) for r, p in projs if r.lower() == only.lower()] or [(only, ".")]
+    return projs
+
+
 def cmd_pull(argv: list[str]) -> int:
     avail = lanes.available_lanes()
     rows = []
-    for repo, _project in ctrl.projects():
+    for repo, _project in _scoped_projects(argv):
         for t in get_board(repo).pull_ready():
             pref, explicit = lanes.lane_preference(t.labels)
             lane, reason = lanes.resolve_lane(pref, explicit, t.tier, avail)
@@ -83,7 +92,7 @@ def cmd_board(argv: list[str]) -> int:
     """The kanban feed: Ready (agent-ready) · Working/Waiting (active workers) · Review (PRs)."""
     avail = lanes.available_lanes()
     ready, review = [], []
-    for repo, _project in ctrl.projects():
+    for repo, _project in _scoped_projects(argv):
         b = get_board(repo)
         try:
             for t in b.pull_ready():
@@ -792,7 +801,49 @@ def cmd_resume(_argv: list[str]) -> int:
     return 0
 
 
+def cmd_repo(argv: list[str]) -> int:
+    """Manage the machine-local repo registry (~/.config/relay/repos.json). The set of repos
+    Relay pulls issues from — what `relay pull/board/dispatch` and the VS Code repo picker read.
+    Pairs with issue #1; label/scaffold onboarding lives there."""
+    import relay_repos
+    sub = argv[0] if argv else "list"
+    rest = argv[1:]
+    if sub == "list":
+        entries = relay_repos.seed_from_env()          # materialize the env list on first run
+        if "--json" in rest:
+            print(json.dumps(entries)); return 0
+        if not entries:
+            print("(no repos registered — `relay repo add <owner/name> [path]`)"); return 0
+        print(f"registry: {relay_repos.registry_path()}")
+        for e in entries:
+            print(f"  {e['name']:<32} {e['path']}  [{e['board']}]")
+        return 0
+    if sub == "add":
+        if not rest:
+            print("usage: relay repo add <owner/name> [path] [--board github|tfs]", file=sys.stderr)
+            return 2
+        name = rest[0]
+        board = _opt(rest, "--board", "github")
+        path = next((a for a in rest[1:] if not a.startswith("--")), None)
+        entries = relay_repos.add(name, path, board or "github")
+        print(f"registered {name} -> {next(e['path'] for e in entries if e['name'].lower()==name.lower())}")
+        print(f"registry: {relay_repos.registry_path()}  ({len(entries)} repo(s))")
+        return 0
+    if sub in ("rm", "remove"):
+        if not rest:
+            print("usage: relay repo rm <owner/name>", file=sys.stderr); return 2
+        before = {e["name"].lower() for e in relay_repos.load()}
+        entries = relay_repos.remove(rest[0])
+        if rest[0].lower() not in before:
+            print(f"{rest[0]} was not registered", file=sys.stderr); return 1
+        print(f"removed {rest[0]}  ({len(entries)} repo(s) remain)")
+        return 0
+    print(f"usage: relay repo <list|add|rm> ...", file=sys.stderr)
+    return 2
+
+
 COMMANDS = {"watch": cmd_watch, "daemon": cmd_daemon, "pull": cmd_pull, "dispatch": cmd_dispatch,
+            "repo": cmd_repo,
             "doctor": cmd_doctor,
             "vscode-package": cmd_vscode_package, "vscode-install": cmd_vscode_install,
             "sessions": cmd_sessions, "session": cmd_session, "timeline": cmd_timeline,

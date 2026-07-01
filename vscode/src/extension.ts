@@ -55,6 +55,8 @@ async function loadDashboardDetail(sessionId: string): Promise<SessionDetail | n
   }
 }
 
+interface RepoEntry { name: string; path: string; board?: string; }
+
 export function activate(ctx: vscode.ExtensionContext): void {
   const provider = new WorkersProvider();
   ctx.subscriptions.push(vscode.window.registerTreeDataProvider('relayWorkers', provider));
@@ -62,6 +64,22 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.command = 'relay.openDashboard';
   ctx.subscriptions.push(status);
+
+  // The active repo scopes pull/dispatch/board to one entry in the relay repo registry.
+  // Persisted per-workspace so the choice survives reloads. Click it to switch.
+  const REPO_KEY = 'relay.activeRepo';
+  const activeRepo = (): RepoEntry | undefined => ctx.workspaceState.get<RepoEntry>(REPO_KEY);
+  const repoFlag = (): string => { const r = activeRepo(); return r ? ` --repo ${r.name}` : ''; };
+  const repoStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+  repoStatus.command = 'relay.selectRepo';
+  ctx.subscriptions.push(repoStatus);
+  const updateRepoStatus = (): void => {
+    const r = activeRepo();
+    repoStatus.text = `$(repo) ${r ? r.name : 'all repos'}`;
+    repoStatus.tooltip = r ? `Relay active repo: ${r.name} (${r.path}) — click to switch` : 'Relay: all registered repos — click to pick one';
+    repoStatus.show();
+  };
+  updateRepoStatus();
 
   // Fast, file-cheap: the tree + status bar (relay status reads disk).
   const refresh = async (): Promise<void> => {
@@ -78,8 +96,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const refreshBoard = async (): Promise<void> => {
     if (!Dashboard.current) { return; }
     let b: Board = { ready: [], active: [], review: [] };
-    try { b = (await runRelayJson<Board>('board')) ?? b; } catch { /* keep last */ }
+    try { b = (await runRelayJson<Board>(`board${repoFlag()}`)) ?? b; } catch { /* keep last */ }
     Dashboard.current.update(b);
+    Dashboard.current.setRepo(activeRepo()?.name || '');
   };
 
   const reg = (id: string, fn: (...a: any[]) => any) =>
@@ -121,7 +140,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const lane = await vscode.window.showQuickPick(
       ['(auto)', 'claude', 'agy', 'copilot', 'codex'], { placeHolder: 'Lane' });
     const laneArg = lane && lane !== '(auto)' ? ` --lane ${lane}` : '';
-    const repoArg = repo ? ` --repo ${repo}` : '';
+    const scoped = repo || activeRepo()?.name;      // card repo wins; else the active repo
+    const repoArg = scoped ? ` --repo ${scoped}` : '';
     try {
       const out = await runRelay(`dispatch ${id}${repoArg}${laneArg}`);
       vscode.window.showInformationMessage(out.trim());
@@ -133,9 +153,37 @@ export function activate(ctx: vscode.ExtensionContext): void {
   reg('relay.dispatchId', (a: { id: string; repo?: string }) => dispatch(a?.id, a?.repo));
   reg('relay.openUrl', (a: { url: string }) => { if (a?.url) { vscode.env.openExternal(vscode.Uri.parse(a.url)); } });
 
+  reg('relay.selectRepo', async () => {
+    let entries: RepoEntry[] = [];
+    try { entries = (await runRelayJson<RepoEntry[]>('repo list')) ?? []; }
+    catch (e: any) { vscode.window.showErrorMessage(`relay repo list: ${e.message}`); return; }
+    if (!entries.length) {
+      vscode.window.showWarningMessage('No repos registered. Add one with: relay repo add <owner/name> [path]');
+      return;
+    }
+    const current = activeRepo()?.name;
+    const items = [
+      { label: '$(list-flat) All repos', description: 'pull & board across the whole registry', e: undefined as RepoEntry | undefined },
+      ...entries.map(e => ({
+        label: (e.name === current ? '$(check) ' : '$(repo) ') + e.name,
+        description: e.path,
+        e,
+      })),
+    ];
+    const pick = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select the active Relay repo (scopes pull, dispatch & board)',
+      matchOnDescription: true,
+    });
+    if (!pick) { return; }
+    await ctx.workspaceState.update(REPO_KEY, pick.e);
+    updateRepoStatus();
+    vscode.window.showInformationMessage(`Relay repo: ${pick.e ? pick.e.name : 'all repos'}`);
+    refresh(); refreshBoard();
+  });
+
   reg('relay.pull', async () => {
     let rows: any[] = [];
-    try { rows = (await runRelayJson<any[]>('pull')) ?? []; }
+    try { rows = (await runRelayJson<any[]>(`pull${repoFlag()}`)) ?? []; }
     catch (e: any) { vscode.window.showErrorMessage(`relay pull: ${e.message}`); return; }
     if (!rows.length) { vscode.window.showInformationMessage('No agent-ready issues.'); return; }
     const pick = await vscode.window.showQuickPick(

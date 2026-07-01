@@ -61,6 +61,10 @@ export class Dashboard {
     this.panel.webview.postMessage({ type: 'board', board });
   }
 
+  setRepo(name: string): void {
+    this.panel.webview.postMessage({ type: 'repo', repo: name });
+  }
+
   updateDetail(detail: SessionDetail | null): void {
     this.panel.webview.postMessage({ type: 'detail', detail });
   }
@@ -81,6 +85,8 @@ export class Dashboard {
       'h2{font-weight:500;font-size:15px;margin:0}',
       '.summary{display:flex;align-items:center;gap:8px}',
       '.badge{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);border-radius:999px;padding:3px 10px;font-size:11px}',
+      '.badge.repo{cursor:pointer;background:color-mix(in srgb, var(--vscode-charts-blue) 30%, transparent);color:var(--vscode-foreground)}',
+      '.badge.repo:hover{background:color-mix(in srgb, var(--vscode-charts-blue) 45%, transparent)}',
       '.toolbar{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}',
       '.btn{font-family:inherit;font-size:12px;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}',
       '.btn:hover{background:var(--vscode-button-hoverBackground)}',
@@ -148,8 +154,9 @@ export class Dashboard {
       '</style></head><body>',
       '<div class="hdr">',
       '<h2>Relay Mission Control</h2>',
-      '<div class="summary"><span class="badge" id="summary">Loading…</span></div>',
+      '<div class="summary"><span class="badge repo" id="repo" title="Active repo — click to switch">all repos</span><span class="badge" id="summary">Loading…</span></div>',
       '<div class="toolbar" role="toolbar" aria-label="Relay actions">',
+      '<button class="btn sec" data-cmd="selectRepo">Repo…</button>',
       '<button class="btn" data-cmd="pull">Dispatch…</button>',
       '<button class="btn sec" data-cmd="togglePause">Pause All</button>',
       '<button class="btn sec" data-cmd="refresh">Refresh</button>',
@@ -198,8 +205,9 @@ export class Dashboard {
       'function bindQueueActions(){Array.from(document.querySelectorAll("[data-select-session]")).forEach((el)=>el.addEventListener("click",()=>{state.selectedSessionId=el.getAttribute("data-select-session")||"";vscode.setState(state);send("selectSession",{sessionId:state.selectedSessionId});}));Array.from(document.querySelectorAll("[data-session-action]")).forEach((el)=>el.addEventListener("click",()=>send("sessionCommand",{command:el.getAttribute("data-session-action"),sessionId:el.getAttribute("data-session-id"),taskId:el.getAttribute("data-task-id")})));Array.from(document.querySelectorAll("[data-open-url]")).forEach((el)=>el.addEventListener("click",()=>send("openUrl",{url:el.getAttribute("data-open-url")})));Array.from(document.querySelectorAll("[data-dispatch-id]")).forEach((el)=>el.addEventListener("click",()=>send("dispatchId",{id:el.getAttribute("data-dispatch-id"),repo:el.getAttribute("data-repo")})));}',
       'function renderQueues(){const b=state.board||{ready:[],active:[],review:[]};const needs=(b.active||[]).filter((r)=>r.state==="needs_decision");byId("needs-count").textContent=String(needs.length);byId("review-count").textContent=String((b.review||[]).length);byId("ready-count").textContent=String((b.ready||[]).length);byId("needs").innerHTML=needs.length?needs.map((r)=>queueCard(r,"needs")).join(""):`<div class="empty">Nothing waiting on an owner decision.</div>`;byId("review").innerHTML=(b.review||[]).length?(b.review||[]).map((r)=>queueCard(r,"review")).join(""):`<div class="empty">No PRs awaiting review.</div>`;byId("ready").innerHTML=(b.ready||[]).length?(b.ready||[]).map(readyCard).join(""):`<div class="empty">No fresh agent-ready issues.</div>`;bindQueueActions();}',
       'function renderAll(){renderStats();ensureSelected();renderQueues();renderFocus();vscode.setState(state);}',
-      'window.addEventListener("message",(e)=>{if(!e.data)return;if(e.data.type==="board"){state.board=e.data.board||{ready:[],active:[],review:[]};renderAll();}if(e.data.type==="detail"){state.detail=e.data.detail||null;renderFocus();vscode.setState(state);}});',
+      'window.addEventListener("message",(e)=>{if(!e.data)return;if(e.data.type==="board"){state.board=e.data.board||{ready:[],active:[],review:[]};renderAll();}if(e.data.type==="detail"){state.detail=e.data.detail||null;renderFocus();vscode.setState(state);}if(e.data.type==="repo"){const el=byId("repo");if(el){el.textContent=e.data.repo||"all repos";}}});',
       'Array.from(document.querySelectorAll("[data-cmd]")).forEach((b)=>b.addEventListener("click",()=>send("command",{command:b.getAttribute("data-cmd")})));',
+      'byId("repo").addEventListener("click",()=>send("command",{command:"selectRepo"}));',
       'renderAll();',
       '</script></body></html>',
     ].join('\n');
