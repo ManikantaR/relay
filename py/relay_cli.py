@@ -824,7 +824,17 @@ def cmd_repo(argv: list[str]) -> int:
             return 2
         name = rest[0]
         board = _opt(rest, "--board", "github")
-        path = next((a for a in rest[1:] if not a.startswith("--")), None)
+        path = None
+        i = 1
+        while i < len(rest):
+            arg = rest[i]
+            if arg == "--board":
+                i += 2
+                continue
+            if not arg.startswith("--"):
+                path = arg
+                break
+            i += 1
         entries = relay_repos.add(name, path, board or "github")
         print(f"registered {name} -> {next(e['path'] for e in entries if e['name'].lower()==name.lower())}")
         print(f"registry: {relay_repos.registry_path()}  ({len(entries)} repo(s))")

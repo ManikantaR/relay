@@ -33,6 +33,7 @@ state = _load("relay_state")
 daemon = _load("relay_daemon")
 review = _load("relay_review")
 bridge = _load("relay_bridge")
+cli = _load("relay_cli")
 from relay_board import Ticket  # noqa: E402
 
 
@@ -1236,6 +1237,21 @@ def test_advance_review_caps_to_needs_decision(tmp_path, monkeypatch):
     assert "needs_decision" in seq
 
 
+def test_advance_review_unknown_caps_to_needs_decision_and_clears_active(tmp_path, monkeypatch):
+    import importlib
+    _quiet(monkeypatch)
+    td = _task(tmp_path, monkeypatch, {"phase": "review", "review_round": 3, "tier": "1",
+                                       "worktree": "", "max_review_rounds": 3})
+    (td / "active").write_text("")
+    calls = []
+    monkeypatch.setattr(ctrl, "finalize_pr", lambda *a, **k: calls.append("finalize"))
+    monkeypatch.setattr(importlib.import_module("relay_bridge"), "mark_needs_decision",
+                        lambda *a, **k: calls.append("needs_decision"))
+    ctrl.advance_review("t1")
+    assert calls == ["needs_decision"]
+    assert not (td / "active").exists()
+
+
 def test_start_review_writes_brief_and_relaunches_reviewer(tmp_path, monkeypatch):
     import importlib
     _quiet(monkeypatch)
@@ -1388,6 +1404,22 @@ def test_registry_rm(tmp_path, monkeypatch):
     repos.add("owner/two", "/repo/two")
     repos.remove("owner/one")
     assert repos.projects() == [("owner/two", "/repo/two")]
+
+
+def test_cmd_repo_add_skips_board_value_when_path_is_omitted(monkeypatch):
+    import relay_repos
+    monkeypatch.setattr(relay_repos, "registry_path", lambda: Path("/tmp/repos.json"))
+    seen = {}
+
+    def fake_add(name, path, board):
+        seen.update({"name": name, "path": path, "board": board})
+        return [{"name": name, "path": path or ".", "board": board}]
+
+    monkeypatch.setattr(relay_repos, "add", fake_add)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        assert cli.cmd_repo(["add", "owner/repo", "--board", "tfs"]) == 0
+    assert seen == {"name": "owner/repo", "path": None, "board": "tfs"}
 
 
 def test_registry_survives_reload(tmp_path, monkeypatch):
