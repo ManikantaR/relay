@@ -24,7 +24,12 @@ Guiding lines (Cherny/Karpathy discipline — keep scope tight, don't over-abstr
 - **Per-issue effort** — `effort:<level>` label + `relay dispatch --effort`.
 - **Reviewer lane** — reviewer always runs claude/Opus, never the implementer's lane.
 - **Dogfood setup** — Relay `.crew/` (sacred set), label set, this roadmap as issues.
-- Tests: 66 → 97.
+- **Repo registry + picker (#1; UX for #2)** — machine-local `~/.config/relay/repos.json`
+  (`$RELAY_REPOS_FILE`/XDG; stdlib-only; seeded from `RELAY_PROJECTS` for back-compat);
+  `relay repo add|list|rm`; `projects()` reads registry → env → single-repo. VS Code
+  "Relay: Select Repo" QuickPick (with inline "Add a repo…"), active repo in `workspaceState`,
+  `pull`/`dispatch`/`board` scoped via `--repo`, repo shown in header badge + status bar.
+- Tests: 66 → 97 → 105 (+8 registry).
 
 ## 🔁 In flight
 - **Live-verify the verifier loop** on smartocrprocess #32 (restart the stale `relay watch`
@@ -34,8 +39,8 @@ Guiding lines (Cherny/Karpathy discipline — keep scope tight, don't over-abstr
 ## 📋 Near-term (GitHub issues, prioritized)
 | # | Item | Tier | Lane | Effort |
 |---|---|---|---|---|
-| [#1](https://github.com/ManikantaR/relay/issues/1) | Repo registry + `relay repo add` (multi-repo onboarding) — **first dogfood** | 2 | claude | high |
-| [#2](https://github.com/ManikantaR/relay/issues/2) | Backlog + dispatch-from-UI panel | 1 | copilot | medium |
+| [#1](https://github.com/ManikantaR/relay/issues/1) | ✅ Repo registry + `relay repo add` (multi-repo onboarding) — **first dogfood** (branch `claude/repo-registry-quickpick`) | 2 | claude | high |
+| [#2](https://github.com/ManikantaR/relay/issues/2) | Backlog + dispatch-from-UI panel — 🔜 repo-picker UX landed; backlog admit/dispatch panel remains | 1 | copilot | medium |
 | [#3](https://github.com/ManikantaR/relay/issues/3) | Generate `model-catalog.json` | 1 | copilot | medium |
 | [#4](https://github.com/ManikantaR/relay/issues/4) | Cross-provider review (configurable reviewer lane) | 2 | claude | medium |
 | [#5](https://github.com/ManikantaR/relay/issues/5) | Real nudge channel (respawn-from-brief) | 2 | claude | high |
