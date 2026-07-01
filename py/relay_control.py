@@ -373,6 +373,7 @@ def advance_review(task: str) -> None:
             # Do NOT file the PR — the work is unreviewed and must not ship on an infra failure.
             bridge.mark_needs_decision(task, f"reviewer produced no verdict after {cap} attempts — PR NOT filed (unreviewed)")
             _notify_once("needs-decision", task, f"reviewer never returned a verdict ({cap}x) — PR not filed; investigate the reviewer lane")
+            _clear_active(task)
         return
 
     # finalize: reachable only for an explicit `approved` verdict now.
