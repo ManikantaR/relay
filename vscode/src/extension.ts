@@ -153,31 +153,57 @@ export function activate(ctx: vscode.ExtensionContext): void {
   reg('relay.dispatchId', (a: { id: string; repo?: string }) => dispatch(a?.id, a?.repo));
   reg('relay.openUrl', (a: { url: string }) => { if (a?.url) { vscode.env.openExternal(vscode.Uri.parse(a.url)); } });
 
+  // Register a brand-new repo from the picker: prompt owner/name, then its local worktree root,
+  // then `relay repo add` (which writes the registry). Returns the new entry, or undefined.
+  const registerRepo = async (): Promise<RepoEntry | undefined> => {
+    const name = (await vscode.window.showInputBox({
+      prompt: 'Add a repo to the Relay registry',
+      placeHolder: 'owner/name  (e.g. ManikantaR/smartocrprocess)',
+      validateInput: (v) => /^[^/\s]+\/[^/\s]+$/.test(v.trim()) ? undefined : 'Enter as owner/name',
+    }))?.trim();
+    if (!name) { return undefined; }
+    const folders = await vscode.window.showOpenDialog({
+      canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+      openLabel: 'Use as worktree root',
+      title: `Local worktree root for ${name}`,
+      defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+    });
+    const path = folders?.[0]?.fsPath;                 // cancelled -> register with default path
+    const pathArg = path ? ` ${path.replace(/ /g, '\\ ')}` : '';
+    try { await runRelay(`repo add ${name}${pathArg}`); }
+    catch (e: any) { vscode.window.showErrorMessage(`relay repo add: ${e.message}`); return undefined; }
+    return { name, path: path || '.', board: 'github' };
+  };
+
   reg('relay.selectRepo', async () => {
     let entries: RepoEntry[] = [];
     try { entries = (await runRelayJson<RepoEntry[]>('repo list')) ?? []; }
     catch (e: any) { vscode.window.showErrorMessage(`relay repo list: ${e.message}`); return; }
-    if (!entries.length) {
-      vscode.window.showWarningMessage('No repos registered. Add one with: relay repo add <owner/name> [path]');
-      return;
-    }
     const current = activeRepo()?.name;
+    const ADD = '$(add) Add a repo…';
     const items = [
-      { label: '$(list-flat) All repos', description: 'pull & board across the whole registry', e: undefined as RepoEntry | undefined },
+      { label: '$(list-flat) All repos', description: 'pull & board across the whole registry', e: undefined as RepoEntry | undefined, add: false },
       ...entries.map(e => ({
         label: (e.name === current ? '$(check) ' : '$(repo) ') + e.name,
         description: e.path,
         e,
+        add: false,
       })),
+      { label: ADD, description: 'register a new owner/name not in the list yet', e: undefined as RepoEntry | undefined, add: true },
     ];
     const pick = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select the active Relay repo (scopes pull, dispatch & board)',
+      placeHolder: 'Select the active Relay repo (scopes pull, dispatch & board), or add a new one',
       matchOnDescription: true,
     });
     if (!pick) { return; }
-    await ctx.workspaceState.update(REPO_KEY, pick.e);
+    let chosen = pick.e;
+    if (pick.add) {
+      chosen = await registerRepo();
+      if (!chosen) { return; }                          // add cancelled — leave the active repo as-is
+    }
+    await ctx.workspaceState.update(REPO_KEY, chosen);
     updateRepoStatus();
-    vscode.window.showInformationMessage(`Relay repo: ${pick.e ? pick.e.name : 'all repos'}`);
+    vscode.window.showInformationMessage(`Relay repo: ${chosen ? chosen.name : 'all repos'}`);
     refresh(); refreshBoard();
   });
 
