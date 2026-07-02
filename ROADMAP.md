@@ -29,12 +29,27 @@ Guiding lines (Cherny/Karpathy discipline — keep scope tight, don't over-abstr
   `relay repo add|list|rm`; `projects()` reads registry → env → single-repo. VS Code
   "Relay: Select Repo" QuickPick (with inline "Add a repo…"), active repo in `workspaceState`,
   `pull`/`dispatch`/`board` scoped via `--repo`, repo shown in header badge + status bar.
-- Tests: 66 → 97 → 105 (+8 registry).
+- **Verifier loop PROVEN end-to-end (2026-06-30)** — first full cycle on macOS: relay dispatched
+  smartocr #32 → codex implemented → **Opus review caught a real metadata-wipe bug** →
+  changes_requested → codex fixed it → **Opus re-approved** → landed on smartocr PR #48. Four
+  platform bugs surfaced + fixed by running it for real:
+  - **BSD `script` compat** — GNU `script -qec` dies on macOS; every claude-lane worker
+    (incl. the reviewer) failed instantly. `_pty_wrap` branches on platform.
+  - **Reviewer writes its verdict in-sandbox** — evidence + `review.json` are staged inside the
+    worktree (the reviewer can't reach relay's data dir), copied back out before clean.
+  - **Never ship unreviewed** — an `unknown` verdict re-runs the reviewer to the cap then
+    `needs_decision`; the `supervise` reviewer-error path routes the same way. Infra failure can
+    never bypass the human gate.
+  - **tmux dup-window fix** — kill the prior same-named window on phase handoff; target by id.
+- **Per-issue model tagging** — `review:<model>` (opus / sonnet-medium) and `impl:<lane>-<model>`
+  (`impl:codex-5.4` → `codex exec -c model=gpt-5.4`).
+- Tests: 66 → 97 → 105 → **111**.
 
-## 🔁 In flight
-- **Live-verify the verifier loop** on smartocrprocess #32 (restart the stale `relay watch`
-  first so it loads current code, then dispatch #32). smartocr #9 already landed live → PR #47
-  (filed by the *stale* watch, so without the review loop).
+## 🔁 In flight (awaiting owner merge)
+- **relay PR [#11](https://github.com/ManikantaR/relay/pull/11)** — the macOS review-loop
+  hardening + model/repo tagging + repo registry (tier-2, read every line).
+- **smartocr PR [#48](https://github.com/ManikantaR/smartocrprocess/pull/48)** — the
+  Opus-approved re-analyze feature (closes smartocr #32); MERGEABLE/CLEAN, checks green.
 
 ## 📋 Near-term (GitHub issues, prioritized)
 | # | Item | Tier | Lane | Effort |
@@ -49,6 +64,8 @@ Guiding lines (Cherny/Karpathy discipline — keep scope tight, don't over-abstr
 | [#8](https://github.com/ManikantaR/relay/issues/8) | Board→repo mapping in the registry | 2 | claude | medium |
 | [#9](https://github.com/ManikantaR/relay/issues/9) | Multi-repo dashboard grouping + filter | 1 | copilot | medium |
 | [#10](https://github.com/ManikantaR/relay/issues/10) | Cost tracking (populate session token/USD) | 1 | agy | medium |
+| [#13](https://github.com/ManikantaR/relay/issues/13) | Enforce `.crew` sacred-path + protected-test gates (files exist but aren't wired) | 2 | claude | high |
+| [#14](https://github.com/ManikantaR/relay/issues/14) | Relay writes its dispatch log centrally, not into product repos | 2 | claude | medium |
 
 ## 🗺️ Later (not yet issues)
 - Web UI (LAN) + Telegram surfaces (RELAY_V2 phases 5–6).
