@@ -159,7 +159,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const name = (await vscode.window.showInputBox({
       prompt: 'Add a repo to the Relay registry',
       placeHolder: 'owner/name  (e.g. ManikantaR/smartocrprocess)',
-      validateInput: (v) => /^[^/\s]+\/[^/\s]+$/.test(v.trim()) ? undefined : 'Enter as owner/name',
+      validateInput: (v) => /^[\w.-]+\/[\w.-]+$/.test(v.trim()) ? undefined : 'Enter as owner/name (letters, digits, . _ -)',
     }))?.trim();
     if (!name) { return undefined; }
     const folders = await vscode.window.showOpenDialog({
