@@ -45,17 +45,21 @@ Guiding lines (Cherny/Karpathy discipline — keep scope tight, don't over-abstr
   (`impl:codex-5.4` → `codex exec -c model=gpt-5.4`).
 - Tests: 66 → 97 → 105 → **111**.
 
-## 🔁 In flight (awaiting owner merge)
-- **relay PR [#11](https://github.com/ManikantaR/relay/pull/11)** — the macOS review-loop
-  hardening + model/repo tagging + repo registry (tier-2, read every line).
-- **smartocr PR [#48](https://github.com/ManikantaR/smartocrprocess/pull/48)** — the
-  Opus-approved re-analyze feature (closes smartocr #32); MERGEABLE/CLEAN, checks green.
+## 🔁 In flight
+- _(nothing awaiting merge)_ — the session's PRs are all merged to `main`:
+  relay **[#11](https://github.com/ManikantaR/relay/pull/11)** (review-loop hardening + model/repo
+  tagging + repo registry) and **[#16](https://github.com/ManikantaR/relay/pull/16)** (repo-picker
+  "Add a repo…" + repo-add parsing fix + review cleanup); smartocr
+  **[#48](https://github.com/ManikantaR/smartocrprocess/pull/48)** (Opus-approved re-analyze,
+  closes smartocr #32).
+- Ops still owner-side: restart `relay watch` so the daemon reloads the merged CLI; capture the
+  live VS Code repo-picker screenshot (needs Screen Recording granted + a Claude relaunch).
 
 ## 📋 Near-term (GitHub issues, prioritized)
 | # | Item | Tier | Lane | Effort |
 |---|---|---|---|---|
-| [#1](https://github.com/ManikantaR/relay/issues/1) | ✅ Repo registry + `relay repo add` (multi-repo onboarding) — **first dogfood** (branch `claude/repo-registry-quickpick`) | 2 | claude | high |
-| [#2](https://github.com/ManikantaR/relay/issues/2) | Backlog + dispatch-from-UI panel — 🔜 repo-picker UX landed; backlog admit/dispatch panel remains | 1 | copilot | medium |
+| [#1](https://github.com/ManikantaR/relay/issues/1) | ✅ Repo registry + `relay repo add` (multi-repo onboarding) — **first dogfood**; merged (#11, #16) | 2 | claude | high |
+| [#2](https://github.com/ManikantaR/relay/issues/2) | Backlog + dispatch-from-UI panel — 🔜 repo-picker UX merged; backlog admit/dispatch panel remains | 1 | copilot | medium |
 | [#3](https://github.com/ManikantaR/relay/issues/3) | Generate `model-catalog.json` | 1 | copilot | medium |
 | [#4](https://github.com/ManikantaR/relay/issues/4) | Cross-provider review (configurable reviewer lane) | 2 | claude | medium |
 | [#5](https://github.com/ManikantaR/relay/issues/5) | Real nudge channel (respawn-from-brief) | 2 | claude | high |
